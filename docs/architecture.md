@@ -1,10 +1,11 @@
 # Architecture
 
 See `PRD.md` for the product context. This describes the technical plan for the full build.
-`spike/` is a Phase 0 proof of concept that currently reflects the **earlier Twilio phone-call
-design** described in this repo's git history — it has not yet been updated for the
-browser-mic pivot described below. Treat it as reference for the Claude tool-use mapping
-pattern (`spike/src/claudeMapper.ts`), not as the current transport design.
+`spike/` is a Phase 0 proof of concept already updated for the browser-mic transport described
+below, including the doctor intro, standard confirmation template, and closing script — see
+`spike/README.md`. It does not yet implement condition branching, the full 6-question loop, or
+the live gait-checker walkthrough/integration below (SMS link, walkthrough guidance, survey
+submission) — those are the next pieces to build on top of it.
 
 ## Call transport (browser, not telephony)
 
@@ -55,8 +56,14 @@ One instance per active call:
 INIT → DOCTOR_INTRO → LOOKUP_CONDITION → ASK_QUESTION(i) → LISTENING(i) → MAPPING(i)
   → CONFIRMING(i) → (yes) → next question, or OUTRO if last question
   → CLARIFYING(i) → back to LISTENING(i)  [bounded retries, e.g. max 2]
-  → OUTRO → SEND_GAIT_LINK → HANGUP → PERSIST
+  → OUTRO → SEND_SMS_LINK → WALKTHROUGH_GUIDANCE → WALKTHROUGH_COUNTDOWN → WALKTHROUGH_OBSERVE
+  → HANGUP → PERSIST
 ```
+
+The call **stays on the line** through the gait check rather than ending after the survey — the
+patient shouldn't be dropped and left to figure out a camera setup alone. This "companion,
+hand-holding" framing (stay with the patient through both the talking part and the physical
+part) is a deliberate product choice, not just a technical one.
 
 - **DOCTOR_INTRO**: a spoken introduction (recorded clip or TTS-voiced script — an
   implementation choice, not decided here) establishing who's calling and why, before any
@@ -82,47 +89,123 @@ INIT → DOCTOR_INTRO → LOOKUP_CONDITION → ASK_QUESTION(i) → LISTENING(i) 
 - **CLARIFYING**: triggered by low confidence or a "no" on confirmation; ask one targeted
   disambiguating question, bounded retries, then fall back to `needs_human_review = true`
   rather than looping indefinitely.
-- **OUTRO**: after the last question is confirmed, a short closing script — a thank-you plus a
-  spoken mention that a gait-checker link is coming, e.g. *"Thank you so much for your time
-  today. We'll send you a link shortly to complete a quick recording for the gait tracker."*
-  This is a fixed, spoken line, not model-generated. At this stage the line is **spoken only**
-  — actually generating/sending the link happens in the following `SEND_GAIT_LINK` state, and
-  per the integration-contract note below, that link-delivery mechanism itself is still being
-  built in the separate gait-checker repo.
-- **SEND_GAIT_LINK**: once all 6 questions are answered and `OUTRO` has played, construct the
-  gait-checker URL (see "Integration contract with the gait checker" below) and deliver it —
-  spoken aloud, shown in the browser UI, and/or sent by SMS (stretch, needs a messaging
-  provider — not required for the browser demo). **Deferred for now**: the user is building the
-  gait checker in a separate repo, so this state's actual link generation/delivery logic is not
-  yet implemented here; `OUTRO`'s spoken mention of "we'll send you a link" stands in for it in
-  the interim.
+- **OUTRO**: after the last question is confirmed, a short thank-you, e.g. *"Thank you so much
+  for your time today."* Fixed, spoken line, not model-generated.
+- **SEND_SMS_LINK**: text the patient their personalized gait-checker link (see "Integration
+  contract" below for the endpoint/shape) using `patients.phone_number`, then speak a fixed
+  confirmation line: *"I've just texted you a secure link. Go ahead and open it on your phone
+  or computer."* SMS requires a messaging provider — see the note on that dependency below;
+  falling back to just speaking/displaying the URL (no real text message) is an acceptable
+  hackathon-demo degradation if SMS isn't wired up in time.
+- **WALKTHROUGH_GUIDANCE**: while still on the line, the AI walks the patient through getting
+  into position, step by step, matching what the gait checker's own on-screen UI shows them
+  (per the handoff spec, their page displays matching visual cues) — e.g. *"Tap the 'Live
+  Camera' mode, prop your device up against a stable surface where your full body is visible,
+  and step back a few paces."* Fixed script, not model-generated — this is instructional, not a
+  point where free-text patient answers need mapping.
+- **WALKTHROUGH_COUNTDOWN**: *"When you're ready, I'll count to three, and you can walk slowly
+  across the frame from left to right,"* then a spoken three-count. Simple fixed TTS lines; no
+  STT/mapping involved.
+- **WALKTHROUGH_OBSERVE**: a short wait while the patient walks (the AI has no visibility into
+  the gait checker's own capture — it's purely a timed pause plus a closing remark, e.g. *"Great,
+  thank you!"*), then `HANGUP`. The gait checker's own page is what actually captures/analyzes
+  the walk; this state exists to keep the call itself feeling attentive, not to do any gait
+  analysis on the voice side.
+- **PERSIST**: after `HANGUP`, submit the call's data — survey answers plus a
+  `walkthrough_completed` flag (see "Integration contract" below) — to the gait checker's
+  backend in one request, and save the full transcript/structured answers to our own Supabase
+  tables.
 - No full-duplex barge-in in the MVP — strict turn-taking (wait for a "TTS finished playing"
   signal before opening the mic) avoids a large class of race conditions that would hurt
   live-demo reliability. Can be added later if time allows.
+- **Not yet implemented in `spike/`**: it currently ends after `OUTRO`. `SEND_SMS_LINK` through
+  `PERSIST` are the next states to build once the integration contract below is wired up.
 
 ## Integration contract with the gait checker
 
-The gait checker is a separate, already-built system (its own repo/deployment, not part of
-this one). This repo's only responsibility is generating and delivering a link at the end of
-the call — it does not implement or depend on the gait checker's internals.
+The gait checker (a separate teammate's repo/deployment — working name **GaitGuard**, a
+Next.js frontend + FastAPI backend with its own live-MediaPipe/simulated-fallback gait
+analysis) is not part of this repo. The two systems divide responsibility cleanly:
 
-- **Outbound (this repo → gait checker)**: a URL carrying enough identifiers for the gait
-  checker to know who it's testing and what to test, e.g.
-  `https://<gait-checker-domain>/start?patient_id=<uuid>&call_id=<uuid>&exercise_set=<orthopedic|stroke>`.
-  Keep this contract minimal (a link with a few query params) precisely because it's the seam
-  between two independently-built systems under hackathon time pressure — every additional
-  field is another thing that has to be agreed and kept in sync.
-- **Inbound (gait checker → this repo), open item**: whether/how gait results get reported
-  back (e.g. a results webhook this server exposes) is **not yet defined** — it depends on
-  what the gait checker repo actually supports. Don't build speculative webhook-receiving code
-  until that contract is confirmed; track it as an open integration point (see `gait_check_links`
-  in the data model below, which records that a link was sent, not what came back).
+- **This repo (voice call) owns**: the conversation (including staying on the line through the
+  gait-check walkthrough — see the state machine above), the 6-question structured survey
+  answers, and — per the handoff spec agreed with that teammate — texting the patient their
+  personalized link mid-call and submitting the survey answers (plus a walkthrough-completed
+  flag) to their backend once the call ends.
+- **The gait checker repo owns**: gait capture/analysis, the personalized patient page, **and
+  the doctor-facing unified clinical report** that merges subjective survey data with objective
+  gait telemetry and an AI-generated clinical synthesis. That report is built and hosted
+  entirely in their repo, not this one — this repo does not need to receive gait results back,
+  build its own merged clinical view, or expose a results-receiving webhook. (This simplifies
+  the "Data model" section below vs. earlier drafts of this doc that assumed we might need a
+  `gait_reports` table on our side — we don't; their backend is the merge point.)
+
+There are now two separate outbound mechanisms, at different points in the call — don't
+conflate them:
+
+**1. Personalized link (at `SEND_SMS_LINK`, mid-call, before any data is submitted)**: the link
+is a deterministic URL from the patient's code, not something returned by an API call, so it
+can be generated and texted before the survey data is ever submitted:
+
+```
+https://<gait-checker-domain>/patient/<patient_code>
+```
+
+e.g. `https://gaitguard.ai/patient/RGN-0417`. The base domain should come from an env var
+(e.g. `GAIT_CHECKER_BASE_URL`), not be hardcoded, since it'll change between their
+dev/staging/demo deployments. Delivering it requires an SMS provider — this is a **new external
+dependency** (the project dropped Twilio's Voice/Media Streams product in the browser-mic
+pivot, but sending a text is a much lighter integration: one HTTP call, no telephony audio
+handling — Twilio's Messaging API or a similar provider both work). Falling back to just
+speaking/displaying the URL if SMS isn't wired up in time is an acceptable hackathon-demo
+degradation (see `WALKTHROUGH_GUIDANCE`'s note above).
+
+**2. Survey + walkthrough data handoff (at `PERSIST`, after `HANGUP`, once)**: `POST` to their
+FastAPI endpoint:
+
+```
+POST https://<gait-checker-domain>/api/submit-survey
+Content-Type: application/json
+
+{
+  "patient_id": "RGN-0417",
+  "timestamp": "2026-09-19T17:38:00Z",
+  "walkthrough_completed": true,
+  "survey_responses": {
+    "pain_scale_1_to_10": 4,
+    "recent_falls": 1,
+    "primary_complaint": "Stiffness in right knee"
+  }
+}
+```
+
+- `patient_id` is the same **human-readable external code** as the link path (e.g.
+  `RGN-0417`), not our internal Supabase `patients.id` UUID — see `patient_code` in the data
+  model below.
+- `walkthrough_completed` is a simple boolean: did the call make it through
+  `WALKTHROUGH_OBSERVE` before hanging up, or did the patient drop off earlier (e.g. during the
+  survey, or mid-walkthrough)? This repo has no way to know whether the patient actually
+  completed the physical walk — only whether our side of the call reached that point — so treat
+  it as "our call flow finished," not as gait-checker-verified completion.
+- `survey_responses` is a flat, human-readable key/value object — not our internal
+  `call_responses` row shape. Build it from that call's confirmed answers, keyed by each
+  question's `code` (or a friendlier per-question key) with the matched answer's label or raw
+  value (e.g. a 0–10 question sends the number, a labeled-scale question sends the label
+  string, matching the mixed style in the example above).
+- **Failure handling**: if this `POST` fails (their service is down, network error, etc.), the
+  patient has already received their link (sent earlier, independently) — don't block or retry
+  indefinitely; flag the call for follow-up (e.g. `gait_check_links.status = 'submit_failed'`)
+  and move on.
+- This contract can still change (it reflects the current handoff spec, not a finalized API);
+  treat exact field names as the best current information, confirm against their actual FastAPI
+  route before wiring up real code.
 
 ## Data model (Supabase / Postgres)
 
 ```sql
 create table patients (
   id uuid primary key default gen_random_uuid(),
+  patient_code text unique not null,   -- human-readable external ID shared with the gait checker, e.g. 'RGN-0417'
   full_name text not null,
   phone_number text not null,          -- E.164
   condition_category text not null,    -- 'orthopedic' | 'stroke' -- drives question-set + gait exercise-set selection
@@ -171,16 +254,16 @@ create table gait_check_links (
   id uuid primary key default gen_random_uuid(),
   call_id uuid references calls(id) on delete cascade,
   url text not null,
-  exercise_set text not null,          -- 'orthopedic' | 'stroke'
+  submitted_survey_data boolean not null default false, -- did the POST to /api/submit-survey succeed?
   sent_at timestamptz default now(),
-  status text not null default 'sent'  -- 'sent' -- extend once the gait checker's result-reporting contract is known
+  status text not null default 'sent'  -- 'sent' | 'submit_failed'
 );
 ```
 
 Row Level Security is left permissive for the hackathon demo (single-tenant); production would
-need RLS and auth given this is PHI-adjacent data. `gait_reports` (or equivalent) is
-deliberately not modeled yet — add it once the gait checker's actual result-delivery contract
-is known, rather than guessing its shape now.
+need RLS and auth given this is PHI-adjacent data. No `gait_reports` table is needed on this
+side — per the integration contract above, the gait checker's own backend is where survey
+answers and gait telemetry are merged into the doctor-facing clinical report, not here.
 
 ## Question banks
 
@@ -213,11 +296,12 @@ VoiceAIThing/
 │   │       ├── routes/calls.ts       # POST /calls, GET /calls, GET /calls/:id
 │   │       ├── ws/browserStream.ts   # browser mic<->Deepgram bridge + drives the state machine
 │   │       ├── call-flow/stateMachine.ts, questions.ts, conditionLookup.ts
-│   │       ├── integrations/deepgramStt.ts, deepgramTts.ts, claudeMapper.ts, gaitLink.ts
+│   │       ├── integrations/deepgramStt.ts, deepgramTts.ts, claudeMapper.ts,
+│   │       │                gaitCheckerClient.ts (link + /api/submit-survey), smsSender.ts
 │   │       └── db/supabaseClient.ts
 │   └── dashboard/               # minimal React (Vite) app
 ├── scripts/seed-questions.ts
-└── spike/                       # Phase 0 spike (currently reflects the pre-pivot Twilio design)
+└── spike/                       # Phase 0 spike, browser-mic transport (see spike/README.md)
 ```
 
 ## Key risks & fallbacks
@@ -235,5 +319,18 @@ VoiceAIThing/
   full utterance, then run STT → Claude → TTS as discrete request/response steps instead of
   continuous streaming. The state machine already models each step discretely, so this is a
   config/timing change, not a redesign.
-- **Gait-checker integration-contract risk**: keep the outbound link minimal (§ Integration
-  contract) so the handoff doesn't depend on details of a system this repo doesn't control.
+- **Gait-checker integration-contract risk**: the `POST /api/submit-survey` shape and
+  `patient_code` scheme (§ Integration contract) come from the other teammate's spec, not a
+  finalized/versioned API — confirm field names against their actual route before relying on
+  them, and make the submission failure-tolerant (§ Integration contract's "Failure handling")
+  so a change or outage on their end doesn't break call completion on ours.
+- **New SMS dependency**: `SEND_SMS_LINK` needs a messaging provider and account setup (e.g.
+  Twilio's Messaging API) that doesn't otherwise exist in the browser-mic design — budget setup
+  time for this the same way the original spike budgeted time for Twilio Voice, even though
+  sending a text is a much smaller integration than the telephony audio bridge that was
+  removed. Fallback: speak/display the URL without a real text message (see `SEND_SMS_LINK`'s
+  note above) if this isn't ready in time.
+- **Staying on the line adds dead air risk**: `WALKTHROUGH_OBSERVE` is a timed pause with no way
+  to know if the patient is actually following along (the voice side can't see the gait
+  checker's camera feed) — keep it short and end with a warm, generic closing line regardless
+  of what actually happened during the walk, rather than trying to infer anything from silence.

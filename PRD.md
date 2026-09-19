@@ -28,9 +28,11 @@ Today this is broken in practice:
 Build a two-stage pipeline: (1) an AI voice conversation that feels like an actual back-and-forth
 talk, opens with a doctor introduction, and collects a standardized 6-question symptom check-in
 — choosing the orthopedic or stroke question set based on the patient's existing record — while
-guaranteeing the collected data stays comparable to a validated instrument; and (2) at the end of
-that call, a handoff to a separate gait-checking system where the patient performs walking/movement
-exercises, so both symptom and movement data reach the doctor from a single check-in.
+guaranteeing the collected data stays comparable to a validated instrument; and (2) rather than
+just handing off and disconnecting, the AI **stays on the line as a companion** through the
+transition to a separate gait-checking system: it texts the patient their personalized link,
+then walks them through getting into position and starting the walk, live, before ending the
+call — so both symptom and movement data reach the doctor from a single, guided check-in.
 
 ## 3. Non-goals
 
@@ -38,9 +40,12 @@ exercises, so both symptom and movement data reach the doctor from a single chec
   the conversation wander — doing so would corrupt the standardized instrument the survey is
   built on. This constraint is non-negotiable regardless of how conversational the call sounds
   (see `CLAUDE.md`).
-- This repo does **not** build or own the gait checker. That system already exists separately;
-  this repo only generates and delivers the link to it and defines the shape of the handoff.
-  Its internals (capture method, analysis, doctor-facing report) are out of scope here.
+- This repo does **not** build or own the gait checker, its capture/analysis, or the
+  doctor-facing unified clinical report — that teammate's system (working name **GaitGuard**)
+  owns all of that, merging our submitted survey answers with its own gait telemetry into the
+  clinician view. This repo's only responsibilities toward that system are submitting a call's
+  survey answers to it and generating the patient's personalized link (see
+  `docs/architecture.md`'s integration contract).
 - Not building EHR integration, patient scheduling, or billing in this phase.
 - Not handling real-time clinical risk triage during the call (e.g. detecting a medical
   emergency mid-conversation) — out of scope for the hackathon build, flagged as a future
@@ -54,8 +59,14 @@ exercises, so both symptom and movement data reach the doctor from a single chec
   a conversation (browser-based for the hackathon demo; a real phone call is a later
   production concern) that opens with a doctor's introduction, answer a fixed set of questions
   relevant to their condition in their own words — at whatever pace they need, including long
-  pauses — get a natural confirmation of how their answer was understood, and finish by
-  receiving a link to a short gait/movement check.
+  pauses — get a natural confirmation of how their answer was understood, and then, rather than
+  being dropped, are texted their personalized gait-check link and walked through getting set
+  up and starting the walk while the AI stays on the line with them like a companion, not a
+  system that hands them off and disappears.
+- **Doctors / clinicians** (downstream, served by the gait-checker teammate's system, not this
+  repo directly): view the unified clinical report — our submitted survey answers merged with
+  gait telemetry and an AI-generated correlation summary — on the gait checker's doctor's
+  portal.
 - **Researchers / clinic leadership** (downstream): consume the aggregated structured data —
   both symptom answers and, once linked, gait results — for outcomes studies comparing
   procedures, protocols, and recovery trajectories across patient populations.
@@ -63,8 +74,10 @@ exercises, so both symptom and movement data reach the doctor from a single chec
 ## 5. Core product requirements
 
 1. **Conversational voice call**: for the hackathon, a browser/desktop mic conversation (not a
-   real phone call — that's a later production concern) that sounds like an actual
-   back-and-forth conversation rather than a rigid menu-driven IVR.
+   real phone call — that's a later production concern) that sounds like a companion
+   hand-holding the patient through the process, not a rigid menu-driven IVR — warm,
+   back-and-forth, and willing to stay with the patient rather than drop them the moment the
+   survey ends.
 2. **Doctor introduction**: every call opens with a spoken introduction establishing who's
    calling and why, before any questions are asked.
 3. **Condition-based question selection**: before asking anything, look up the patient's
@@ -87,19 +100,34 @@ exercises, so both symptom and movement data reach the doctor from a single chec
    than unpredictable, alongside the doctor introduction.
 7. **Human-review fallback**: if an answer can't be confidently mapped after clarification
    attempts are exhausted, it's flagged for human review rather than guessed.
-8. **Closing script and end-of-call gait-checker handoff**: after the last question is
-   confirmed, the system closes with a short thank-you plus a spoken mention that a gait-checker
-   link is coming (e.g. "Thank you so much for your time today. We'll send you a link shortly to
-   complete a quick recording for the gait tracker."). Actually generating and delivering that
-   link — scoped to the right exercise set for the patient's condition category — is being built
-   separately in the external gait-checker's own repo; for now the call only speaks the line
-   above, it doesn't yet produce or send a real link.
+8. **Guided handoff to the gait checker — the call stays on the line**: after the last question
+   is confirmed, the AI doesn't just say goodbye and hang up. It:
+   1. Gives a short thank-you.
+   2. Texts the patient their personalized gait-checker link
+      (`https://<gait-checker-domain>/patient/<patient_code>`) and says so ("I've just texted
+      you a secure link. Go ahead and open it on your phone or computer.").
+   3. Stays on the line and gives live, step-by-step spoken instructions for getting into
+      position — matching the visual cues the gait checker's own page shows (e.g. "Tap the
+      'Live Camera' mode, prop your device up against a stable surface where your full body is
+      visible, and step back a few paces.").
+   4. Counts the patient into the walk ("When you're ready, I'll count to three, and you can
+      walk slowly across the frame from left to right.") and waits briefly before a warm
+      closing line and hanging up.
+   5. Once the call ends, `POST`s the survey answers plus a `walkthrough_completed` flag to the
+      gait checker's backend (`/api/submit-survey`) in one request — see
+      `docs/architecture.md`'s integration contract for the exact payload/link shape and why
+      the link-texting and data-submission steps happen at different points in the call.
+   **Not yet implemented in `spike/`** (it currently ends after the thank-you); this is the next
+   piece to build, and it introduces a new dependency (an SMS provider) the project didn't
+   previously need.
 9. **Data capture**: every call's full transcript and every question's structured answer (raw
    text, mapped value, confidence, confirmation status) is persisted for later review and
    research use.
-10. **Clinic-facing review**: a minimal dashboard to trigger calls and review completed call
-    transcripts/structured answers, with room to show linked gait-checker results once that
-    integration exists.
+10. **Clinic-facing review**: a minimal dashboard, owned by this repo, to trigger calls and
+    review completed call transcripts/structured answers for internal QA/follow-up. This is
+    distinct from the doctor-facing **unified clinical report**, which lives entirely on the
+    gait checker's doctor's portal and merges our submitted survey data with their gait
+    telemetry — this repo does not build or duplicate that merged view.
 11. **Opt-out**: patients should be able to opt out of AI-conducted calls in favor of a human
     follow-up (design consideration for the full product; not required for the hackathon demo).
 
@@ -112,9 +140,9 @@ exercises, so both symptom and movement data reach the doctor from a single chec
 - At least one answer is given as a realistic, rambling response (not a clean one-word answer),
   including a deliberately long pause, and is still correctly mapped, confirmed, and handled
   gracefully by the longer turn-taking timeout.
-- Every confirmation uses the standard template phrasing, and the call closes with the
-  thank-you + gait-checker mention script (real link generation is out of scope for this repo's
-  demo — see requirement 8).
+- Every confirmation uses the standard template phrasing, and after the last question the AI
+  stays on the line — texts the link, walks the patient through camera setup, and counts them
+  into the walk — rather than hanging up right after the survey (see requirement 8).
 - Completed call data (transcript + structured answers) is visible in a dashboard immediately
   after the call.
 
@@ -145,24 +173,35 @@ exercises, so both symptom and movement data reach the doctor from a single chec
   threshold rather than a typical voice-agent default — relevant for elderly orthopedic
   patients and doubly so for stroke patients.
 - **Integration-contract risk**: the voice call and the gait checker are two independently
-  built systems. If the URL/query-param contract between them isn't agreed and kept minimal,
-  the handoff breaks. Keep the contract to a simple link (patient/call identifiers + exercise
-  set) to reduce coordination risk under hackathon time pressure — see
-  `docs/architecture.md`'s integration-contract section.
+  built systems, and the `POST /api/submit-survey` payload shape + shared `patient_code` scheme
+  reflect the teammate's current spec, not a finalized/versioned API. Confirm field names
+  against their actual route before relying on them, and make the submission failure-tolerant
+  (the patient already has their link by the time this `POST` fires, so a failure here shouldn't
+  block or retry indefinitely) — see `docs/architecture.md`'s integration-contract section.
+- **New SMS dependency**: texting the link mid-call needs a messaging provider and account setup
+  that the browser-mic pivot otherwise avoided — budget setup time for it, and have a fallback
+  (speak/display the URL without a real text) ready in case it's not wired up in time.
 - **Trust/consent risk**: patients need to know they're talking to an AI and be able to opt for
   a human alternative (design requirement for production, not the hackathon demo).
 
 ## 9. Scope for this hackathon (HackMIT)
 
-Both the voice call system (this repo) and the gait checker (a separate repo/deployment) are
-full-scope deliverables, built independently and meeting only at the link handoff. This repo's
-scope is: the browser-based conversational voice call, condition-based question branching
-between an orthopedic set and a stroke set, the confirmation/clarification loop, Supabase-backed
-storage, a minimal review dashboard, and generating the gait-checker link at the end of the call.
-Out of scope for this repo: the gait checker's own capture/analysis/reporting, receiving results
-back from it (flagged as an open integration point until that contract is defined), scheduling
-automation for when calls go out, opt-out flows, EHR integration, and clinical risk triage.
+Both the voice call system (this repo) and the gait checker/doctor's-portal system (a separate
+repo/deployment, working name **GaitGuard**) are full-scope deliverables, built independently
+and meeting at a live handoff: this repo texts the patient their personalized link mid-call,
+stays on the line to guide them into position for the walk, and submits survey answers plus a
+completion flag once the call ends; their repo owns gait capture/analysis and the unified
+doctor-facing clinical report entirely. This repo's scope is: the browser-based conversational
+voice call, condition-based question branching between an orthopedic set and a stroke set, the
+standardized confirmation template and closing/handoff script, the confirmation/clarification
+loop, the live walkthrough guidance, Supabase-backed storage, a minimal internal review
+dashboard, and the SMS link delivery + end-of-call survey submission. Out of scope for this
+repo: the gait checker's own capture/analysis/reporting, the doctor's portal itself, receiving
+anything back from that system (their backend is the merge point, not ours — see
+`docs/architecture.md`'s integration contract), scheduling automation for when calls go out,
+opt-out flows, EHR integration, and clinical risk triage.
 See `docs/architecture.md` for the technical plan and `spike/README.md` for the current Phase 0
-feasibility spike status (note: the spike currently reflects the earlier Twilio phone-call
-design and needs to be revisited for the browser-mic pivot before it's used as a base for the
-full build).
+feasibility spike status (the spike already runs the browser-mic conversation with the doctor
+intro, standard confirmation template, and closing thank-you; it does not yet implement
+condition branching, the full 6-question loop, or the guided gait-checker handoff in
+requirement 8 above).
