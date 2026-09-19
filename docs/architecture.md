@@ -2,10 +2,11 @@
 
 See `PRD.md` for the product context. This describes the technical plan for the full build.
 `spike/` is a Phase 0 proof of concept already updated for the browser-mic transport described
-below, including the doctor intro, standard confirmation template, and closing script — see
-`spike/README.md`. It does not yet implement condition branching, the full 6-question loop, or
-the live gait-checker walkthrough/integration below (SMS link, walkthrough guidance, survey
-submission) — those are the next pieces to build on top of it.
+below, including the doctor intro, standard confirmation template, closing script, and the full
+live gait-checker handoff (SMS link, walkthrough guidance/countdown, and the end-of-call survey
+submission) — see `spike/README.md`. It does not yet implement condition branching or the full
+6-question loop (still one hardcoded question); those are the next pieces to build on top of
+it.
 
 ## Call transport (browser, not telephony)
 
@@ -118,8 +119,9 @@ part) is a deliberate product choice, not just a technical one.
 - No full-duplex barge-in in the MVP — strict turn-taking (wait for a "TTS finished playing"
   signal before opening the mic) avoids a large class of race conditions that would hurt
   live-demo reliability. Can be added later if time allows.
-- **Not yet implemented in `spike/`**: it currently ends after `OUTRO`. `SEND_SMS_LINK` through
-  `PERSIST` are the next states to build once the integration contract below is wired up.
+- **Implemented in `spike/`**: `SEND_SMS_LINK` through `PERSIST` all run (`src/server.ts`,
+  `src/gaitCheckerClient.ts`, `src/smsSender.ts`); `PERSIST` there only submits to the gait
+  checker (no Supabase yet, since the spike has no database — see `spike/README.md`).
 
 ## Integration contract with the gait checker
 

@@ -117,9 +117,9 @@ call — so both symptom and movement data reach the doctor from a single, guide
       gait checker's backend (`/api/submit-survey`) in one request — see
       `docs/architecture.md`'s integration contract for the exact payload/link shape and why
       the link-texting and data-submission steps happen at different points in the call.
-   **Not yet implemented in `spike/`** (it currently ends after the thank-you); this is the next
-   piece to build, and it introduces a new dependency (an SMS provider) the project didn't
-   previously need.
+   **Implemented in `spike/`** (see `spike/README.md`); the new SMS provider dependency this
+   introduced falls back to a spoken/logged link if not configured, rather than failing the
+   call.
 9. **Data capture**: every call's full transcript and every question's structured answer (raw
    text, mapped value, confidence, confirmation status) is persisted for later review and
    research use.
@@ -202,6 +202,6 @@ anything back from that system (their backend is the merge point, not ours — s
 opt-out flows, EHR integration, and clinical risk triage.
 See `docs/architecture.md` for the technical plan and `spike/README.md` for the current Phase 0
 feasibility spike status (the spike already runs the browser-mic conversation with the doctor
-intro, standard confirmation template, and closing thank-you; it does not yet implement
-condition branching, the full 6-question loop, or the guided gait-checker handoff in
-requirement 8 above).
+intro, standard confirmation template, closing thank-you, and the full guided gait-checker
+handoff from requirement 8 above; it does not yet implement condition branching or the full
+6-question loop).

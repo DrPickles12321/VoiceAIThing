@@ -22,11 +22,32 @@ export const DOCTOR_INTRO_TEXT =
   "I'm going to ask you a quick question about it -- take your time answering, there's no rush at all.";
 
 // Closing script played after the last question is confirmed (see docs/architecture.md's
-// OUTRO state). Actually generating/sending the gait-checker link is being built separately
-// in that project's own repo -- this is a spoken line only, not a real link-delivery step.
-export const OUTRO_TEXT =
-  "Thank you so much for your time today. We'll send you a link shortly to complete a quick " +
-  "recording for the gait tracker.";
+// OUTRO state). The call stays on the line after this -- see the SEND_SMS_LINK /
+// WALKTHROUGH_* states below -- rather than hanging up right after the thank-you.
+export const OUTRO_TEXT = "Thank you so much for your time today.";
+
+// Spoken right after the gait-checker link is texted (or, if SMS isn't configured, right
+// after it's logged as a fallback -- see docs/architecture.md's "New SMS dependency" risk).
+export const SMS_LINK_CONFIRMATION_TEXT =
+  "I've just texted you a secure link. Go ahead and open it on your phone or computer.";
+
+// Live, step-by-step guidance for getting into position -- matches the visual cues the gait
+// checker's own page shows (per the handoff spec). Fixed script, not model-generated: this is
+// instructional, not a point where free-text patient answers need mapping.
+export const WALKTHROUGH_GUIDANCE_TEXT =
+  "Tap the 'Live Camera' mode, prop your device up against a stable surface where your full " +
+  "body is visible, and step back a few paces.";
+
+// Counts the patient into the walk. The "one... two... three" pacing is baked into the text
+// itself (via pauses) rather than split into separate TTS calls, to keep this simple.
+export const WALKTHROUGH_COUNTDOWN_TEXT =
+  "When you're ready, I'll count to three, and you can walk slowly across the frame from " +
+  "left to right. One... two... three... go ahead.";
+
+// Played after a short observation pause (see docs/architecture.md's WALKTHROUGH_OBSERVE
+// state) -- a warm, generic closing regardless of what actually happened during the walk,
+// since the voice side has no visibility into the gait checker's own camera feed.
+export const WALKTHROUGH_CLOSING_TEXT = "Great, thank you! Take care.";
 
 export const SPIKE_QUESTION: PromQuestion = {
   code: "PAIN_1",

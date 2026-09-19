@@ -5,9 +5,19 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
 import { env } from "./env.js";
-import { DOCTOR_INTRO_TEXT, OUTRO_TEXT, SPIKE_QUESTION } from "./question.js";
-import { mapAnswer } from "./claudeMapper.js";
+import {
+  DOCTOR_INTRO_TEXT,
+  OUTRO_TEXT,
+  SMS_LINK_CONFIRMATION_TEXT,
+  SPIKE_QUESTION,
+  WALKTHROUGH_CLOSING_TEXT,
+  WALKTHROUGH_COUNTDOWN_TEXT,
+  WALKTHROUGH_GUIDANCE_TEXT,
+} from "./question.js";
+import { mapAnswer, type MappedAnswer } from "./claudeMapper.js";
 import { synthesizeLinear16, TTS_SAMPLE_RATE } from "./deepgramTts.js";
+import { buildPatientLink, submitSurvey } from "./gaitCheckerClient.js";
+import { sendLinkSms } from "./smsSender.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -26,6 +36,10 @@ type CallState =
   | "MAPPING"
   | "PLAYING_CONFIRMATION"
   | "OUTRO"
+  | "SEND_SMS_LINK"
+  | "WALKTHROUGH_GUIDANCE"
+  | "WALKTHROUGH_COUNTDOWN"
+  | "WALKTHROUGH_OBSERVE"
   | "DONE";
 
 // Waits this long after the patient stops talking before assuming they're done --
@@ -34,6 +48,11 @@ type CallState =
 const ENDPOINTING_MS = 3500;
 const UTTERANCE_END_MS = 4000;
 const SILENCE_BACKSTOP_MS = 4500;
+
+// How long to silently "watch" the patient walk before the closing line -- the voice side has
+// no visibility into the gait checker's own camera feed, so this is just a timed pause (see
+// docs/architecture.md's WALKTHROUGH_OBSERVE state).
+const WALKTHROUGH_OBSERVE_MS = 5000;
 
 const httpServer = createServer(app);
 const wss = new WebSocketServer({ server: httpServer, path: "/media" });
@@ -58,6 +77,7 @@ wss.on("connection", (ws: WebSocket) => {
   let finalTranscript = "";
   let silenceTimer: NodeJS.Timeout | null = null;
   let dgLive: ReturnType<typeof deepgram.listen.live> | null = null;
+  let lastMappedAnswer: MappedAnswer | null = null;
 
   function resetSilenceBackstop() {
     if (silenceTimer) clearTimeout(silenceTimer);
@@ -83,6 +103,7 @@ wss.on("connection", (ws: WebSocket) => {
 
     try {
       const mapped = await mapAnswer(SPIKE_QUESTION, finalTranscript);
+      lastMappedAnswer = mapped;
       console.log("[flow] Claude mapping:", mapped);
       sendJson(ws, { type: "mapping", ...mapped });
 
@@ -178,7 +199,37 @@ wss.on("connection", (ws: WebSocket) => {
           sendJson(ws, { type: "state", state });
           await speak(ws, OUTRO_TEXT, "outro-done");
         } else if (msg.markName === "outro-done") {
-          console.log("[flow] closing script played, ending spike call");
+          console.log("[flow] thank-you played, texting the gait-checker link");
+          state = "SEND_SMS_LINK";
+          sendJson(ws, { type: "state", state });
+          const link = buildPatientLink(env.PATIENT_CODE);
+          const { sent } = await sendLinkSms(link);
+          sendJson(ws, { type: "gait_link", url: link, sent_via_sms: sent });
+          await speak(ws, SMS_LINK_CONFIRMATION_TEXT, "sms-link-done");
+        } else if (msg.markName === "sms-link-done") {
+          console.log("[flow] staying on the line, giving walkthrough guidance");
+          state = "WALKTHROUGH_GUIDANCE";
+          sendJson(ws, { type: "state", state });
+          await speak(ws, WALKTHROUGH_GUIDANCE_TEXT, "guidance-done");
+        } else if (msg.markName === "guidance-done") {
+          state = "WALKTHROUGH_COUNTDOWN";
+          sendJson(ws, { type: "state", state });
+          await speak(ws, WALKTHROUGH_COUNTDOWN_TEXT, "countdown-done");
+        } else if (msg.markName === "countdown-done") {
+          console.log(`[flow] observing for ${WALKTHROUGH_OBSERVE_MS}ms before closing`);
+          state = "WALKTHROUGH_OBSERVE";
+          sendJson(ws, { type: "state", state });
+          setTimeout(async () => {
+            if (state !== "WALKTHROUGH_OBSERVE") return; // connection may have closed already
+            await speak(ws, WALKTHROUGH_CLOSING_TEXT, "closing-done");
+          }, WALKTHROUGH_OBSERVE_MS);
+        } else if (msg.markName === "closing-done") {
+          console.log("[flow] call finished, submitting survey to the gait checker");
+          const answers = lastMappedAnswer
+            ? [{ question: SPIKE_QUESTION, mapped: lastMappedAnswer }]
+            : [];
+          const { ok } = await submitSurvey(env.PATIENT_CODE, answers, true);
+          sendJson(ws, { type: "survey_submitted", ok });
           state = "DONE";
           sendJson(ws, { type: "state", state });
           ws.close();

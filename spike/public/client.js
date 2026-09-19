@@ -86,6 +86,12 @@ async function startCall() {
             `needs_clarification=${msg.needs_clarification}`,
         );
         break;
+      case "gait_link":
+        log(`[gait-checker] link: ${msg.url} (sent via SMS: ${msg.sent_via_sms})`);
+        break;
+      case "survey_submitted":
+        log(`[gait-checker] survey submitted: ${msg.ok}`);
+        break;
       case "error":
         log(`[error] ${msg.text}`);
         break;
