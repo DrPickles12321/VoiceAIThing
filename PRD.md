@@ -79,16 +79,21 @@ exercises, so both symptom and movement data reach the doctor from a single chec
 5. **Answer-to-scale mapping**: an LLM (Claude, via forced tool-use — see `CLAUDE.md`) maps the
    patient's free-text answer to the correct discrete point on that question's fixed answer
    scale. This call can only return a structured mapping, never open-ended chat.
-6. **Confirmation loop**: before recording a final answer, the system states back its
-   interpretation in natural language ("So it sounds like your knee pain has been moderate —
-   is that right?") and only proceeds once confirmed, or asks a bounded number of targeted
-   clarifying questions if the answer was ambiguous.
+6. **Confirmation loop**: after every question, the system states back its interpretation
+   using a consistent, standard template — *"You said your \<topic\> was \<answer\>, correct?"*
+   — rather than varying the phrasing question to question, and only proceeds once confirmed,
+   or asks a bounded number of targeted clarifying questions if the answer was ambiguous. The
+   consistent template is deliberate: it's part of what makes the AI sound trustworthy rather
+   than unpredictable, alongside the doctor introduction.
 7. **Human-review fallback**: if an answer can't be confidently mapped after clarification
    attempts are exhausted, it's flagged for human review rather than guessed.
-8. **End-of-call gait-checker handoff**: once all 6 questions are answered, the system
-   generates a link to the (external) gait checker, scoped to the right exercise set for the
-   patient's condition category, and delivers it to the patient (spoken aloud and/or shown on
-   screen; SMS delivery is a stretch goal, not required for the browser demo).
+8. **Closing script and end-of-call gait-checker handoff**: after the last question is
+   confirmed, the system closes with a short thank-you plus a spoken mention that a gait-checker
+   link is coming (e.g. "Thank you so much for your time today. We'll send you a link shortly to
+   complete a quick recording for the gait tracker."). Actually generating and delivering that
+   link — scoped to the right exercise set for the patient's condition category — is being built
+   separately in the external gait-checker's own repo; for now the call only speaks the line
+   above, it doesn't yet produce or send a real link.
 9. **Data capture**: every call's full transcript and every question's structured answer (raw
    text, mapped value, confidence, confirmation status) is persisted for later review and
    research use.
@@ -107,8 +112,9 @@ exercises, so both symptom and movement data reach the doctor from a single chec
 - At least one answer is given as a realistic, rambling response (not a clean one-word answer),
   including a deliberately long pause, and is still correctly mapped, confirmed, and handled
   gracefully by the longer turn-taking timeout.
-- The call ends by generating a gait-checker link tied to the patient/call and the right
-  exercise set for their condition.
+- Every confirmation uses the standard template phrasing, and the call closes with the
+  thank-you + gait-checker mention script (real link generation is out of scope for this repo's
+  demo — see requirement 8).
 - Completed call data (transcript + structured answers) is visible in a dashboard immediately
   after the call.
 

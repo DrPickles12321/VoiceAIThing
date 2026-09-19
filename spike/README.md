@@ -29,20 +29,27 @@ entirely. Everything here runs on `localhost`.
    up the stairs after gardening it really acts up...") and **deliberately pause mid-sentence**
    to check that the system waits for you instead of cutting you off (it's tuned to wait
    roughly 3–4 seconds of silence before assuming you're done). Watch the on-page log and the
-   server's terminal output: live transcript, Claude's `map_answer` tool call result, and
-   finally the spoken confirmation before the call ends.
+   server's terminal output: live transcript, Claude's `map_answer` tool call result, the
+   spoken confirmation ("You said your knee pain was \_\_\_, correct?" — always this exact
+   template), and finally a closing thank-you that mentions a gait-checker link is coming
+   before the call ends.
 
 ## What to judge
 
-- **Conversational feel**: does the doctor intro + question + confirmation sequence feel like
-  an actual conversation, not a rigid menu?
+- **Conversational feel**: does the doctor intro + question + confirmation + closing sequence
+  feel like an actual conversation, not a rigid menu?
+- **Confirmation consistency**: does the confirmation always follow the "You said your \<topic\>
+  was \<answer\>, correct?" template regardless of how the patient phrased their answer?
 - **Turn-taking**: does the ~3–4 second pause tolerance feel right — long enough not to cut
   patients off mid-thought, but not so long the call feels unresponsive?
 - **Audio quality**: did mic capture and TTS playback both come through cleanly (garbled or
   silent audio would point to a sample-rate mismatch between the browser and Deepgram)?
-- **Mapping quality**: did Claude pick a sensible scale value from a rambling answer, and did
-  the confirmation sentence sound natural rather than robotic?
+- **Mapping quality**: did Claude pick a sensible scale value from a rambling answer?
 - **Latency**: was the pause between finishing speaking and hearing the confirmation tolerable?
+
+Note: the closing line mentions a gait-checker link, but no real link is generated or sent yet
+— that integration is being built separately (see `docs/architecture.md`'s "Integration
+contract with the gait checker" and `PRD.md` requirement 8). This spike only speaks the line.
 
 ## How it works (for orientation)
 
@@ -51,7 +58,7 @@ entirely. Everything here runs on `localhost`.
   posts them to the main thread, which streams them over a WebSocket; TTS audio comes back the
   same way and is scheduled for gapless playback via `AudioContext`.
 - `src/server.ts` — the state machine: `DOCTOR_INTRO → PLAYING_QUESTION → LISTENING → MAPPING
-  → PLAYING_CONFIRMATION → DONE`. Turn-taking is coordinated by the client reporting back
+  → PLAYING_CONFIRMATION → OUTRO → DONE`. Turn-taking is coordinated by the client reporting back
   `{type: "playback_done", markName}` once it's finished playing a given line, mirroring what
   Twilio's `mark` events did for the old telephony version.
 - `src/integrations` equivalents: `src/deepgramTts.ts` (linear16 PCM synthesis) and

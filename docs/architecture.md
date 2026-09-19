@@ -53,9 +53,9 @@ One instance per active call:
 
 ```
 INIT → DOCTOR_INTRO → LOOKUP_CONDITION → ASK_QUESTION(i) → LISTENING(i) → MAPPING(i)
-  → CONFIRMING(i) → (yes) → next question, or SEND_GAIT_LINK if last question
+  → CONFIRMING(i) → (yes) → next question, or OUTRO if last question
   → CLARIFYING(i) → back to LISTENING(i)  [bounded retries, e.g. max 2]
-  → SEND_GAIT_LINK → HANGUP → PERSIST
+  → OUTRO → SEND_GAIT_LINK → HANGUP → PERSIST
 ```
 
 - **DOCTOR_INTRO**: a spoken introduction (recorded clip or TTS-voiced script — an
@@ -71,16 +71,31 @@ INIT → DOCTOR_INTRO → LOOKUP_CONDITION → ASK_QUESTION(i) → LISTENING(i) 
   `tool_choice` forcing a `map_answer` tool call:
   `{mapped_value, confidence, needs_clarification, patient_facing_confirmation}`. This is the
   core data-integrity guarantee — the model can only return a structured mapping and the exact
-  confirmation sentence to speak, never open-ended chat. The confirmation sentence can be
-  written to sound warm and conversational; the mechanism that produces it stays forced
-  tool-use either way — see `CLAUDE.md`'s non-negotiable constraint.
+  confirmation sentence to speak, never open-ended chat. `patient_facing_confirmation` must
+  follow a **standard, recognizable template every time** — *"You said your \<topic\> was
+  \<label\>, correct?"*, filling in the question's domain/topic and the matched answer option's
+  label — rather than open-ended natural phrasing that could vary unpredictably question to
+  question. This is a deliberate trust/consistency choice, not just a data-integrity one: a
+  patient should be able to tell they're being confirmed the same way every time. The mechanism
+  that produces it stays forced tool-use either way — see `CLAUDE.md`'s non-negotiable
+  constraint.
 - **CLARIFYING**: triggered by low confidence or a "no" on confirmation; ask one targeted
   disambiguating question, bounded retries, then fall back to `needs_human_review = true`
   rather than looping indefinitely.
-- **SEND_GAIT_LINK**: once all 6 questions are answered, construct the gait-checker URL (see
-  "Integration contract with the gait checker" below) and deliver it — spoken aloud, shown in
-  the browser UI, and/or sent by SMS (stretch, needs a messaging provider — not required for
-  the browser demo).
+- **OUTRO**: after the last question is confirmed, a short closing script — a thank-you plus a
+  spoken mention that a gait-checker link is coming, e.g. *"Thank you so much for your time
+  today. We'll send you a link shortly to complete a quick recording for the gait tracker."*
+  This is a fixed, spoken line, not model-generated. At this stage the line is **spoken only**
+  — actually generating/sending the link happens in the following `SEND_GAIT_LINK` state, and
+  per the integration-contract note below, that link-delivery mechanism itself is still being
+  built in the separate gait-checker repo.
+- **SEND_GAIT_LINK**: once all 6 questions are answered and `OUTRO` has played, construct the
+  gait-checker URL (see "Integration contract with the gait checker" below) and deliver it —
+  spoken aloud, shown in the browser UI, and/or sent by SMS (stretch, needs a messaging
+  provider — not required for the browser demo). **Deferred for now**: the user is building the
+  gait checker in a separate repo, so this state's actual link generation/delivery logic is not
+  yet implemented here; `OUTRO`'s spoken mention of "we'll send you a link" stands in for it in
+  the interim.
 - No full-duplex barge-in in the MVP — strict turn-taking (wait for a "TTS finished playing"
   signal before opening the mic) avoids a large class of race conditions that would hurt
   live-demo reliability. Can be added later if time allows.

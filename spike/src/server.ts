@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
 import { env } from "./env.js";
-import { DOCTOR_INTRO_TEXT, SPIKE_QUESTION } from "./question.js";
+import { DOCTOR_INTRO_TEXT, OUTRO_TEXT, SPIKE_QUESTION } from "./question.js";
 import { mapAnswer } from "./claudeMapper.js";
 import { synthesizeLinear16, TTS_SAMPLE_RATE } from "./deepgramTts.js";
 
@@ -25,6 +25,7 @@ type CallState =
   | "LISTENING"
   | "MAPPING"
   | "PLAYING_CONFIRMATION"
+  | "OUTRO"
   | "DONE";
 
 // Waits this long after the patient stops talking before assuming they're done --
@@ -170,7 +171,14 @@ wss.on("connection", (ws: WebSocket) => {
           sendJson(ws, { type: "state", state });
           resetSilenceBackstop();
         } else if (msg.markName === "confirmation-done") {
-          console.log("[flow] confirmation played, ending spike call");
+          // In the full 6-question build this only fires after the last question; the
+          // spike has just one, so it always goes straight to the closing script.
+          console.log("[flow] confirmation played, playing closing script");
+          state = "OUTRO";
+          sendJson(ws, { type: "state", state });
+          await speak(ws, OUTRO_TEXT, "outro-done");
+        } else if (msg.markName === "outro-done") {
+          console.log("[flow] closing script played, ending spike call");
           state = "DONE";
           sendJson(ws, { type: "state", state });
           ws.close();

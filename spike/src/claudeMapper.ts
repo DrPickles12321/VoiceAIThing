@@ -33,6 +33,7 @@ export async function mapAnswer(
         role: "user",
         content:
           `Question asked: "${question.promptText}"\n` +
+          `Confirmation topic (use this exact phrase): "${question.topic}"\n` +
           `Fixed answer scale: ${optionsList}\n\n` +
           `Patient's spoken answer (transcribed): "${patientTranscript}"\n\n` +
           "Map this to the closest scale value.",
@@ -62,10 +63,12 @@ export async function mapAnswer(
             patient_facing_confirmation: {
               type: "string",
               description:
-                "One short, natural sentence to speak back to the patient confirming the mapped answer, " +
-                "e.g. \"So it sounds like your knee pain has been moderate - is that right?\". " +
-                "If needs_clarification is true, instead ask a short targeted disambiguating question " +
-                "using only the scale's own labels.",
+                "Always phrase this using the exact standard template: " +
+                `"You said your ${question.topic} was <answer label>, correct?" -- filling in ` +
+                "<answer label> with the matched scale option's label (e.g. \"You said your " +
+                `${question.topic} was moderate, correct?"). Use this template every time, ` +
+                "do not vary the wording. If needs_clarification is true, instead ask a short " +
+                "targeted disambiguating question using only the scale's own labels.",
             },
           },
           required: [
