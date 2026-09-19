@@ -1,6 +1,6 @@
 {
   "survey_code": "KOOS_HOOS_SUBSET_V1",
-  "description": "Representative subset of KOOS/HOOS-styled knee/hip outcome questions for the HackMIT demo. Not the full validated instrument -- a representative sample covering pain, stiffness, function, and quality of life for demo purposes.",
+  "description": "Representative subset of KOOS/HOOS-styled knee/hip outcome questions for the HackMIT demo. Not the full validated instrument -- a representative sample covering pain, stiffness, function, and quality of life for demo purposes. Trimmed to 6 questions to match the call's target length.",
   "questions": [
     {
       "code": "PAIN_1",
@@ -55,21 +55,8 @@
       ]
     },
     {
-      "code": "FUNCTION_RISING",
-      "sequence_order": 5,
-      "domain": "function",
-      "prompt_text": "How much difficulty do you have rising from sitting?",
-      "answer_options": [
-        { "code": 0, "label": "None" },
-        { "code": 1, "label": "Mild" },
-        { "code": 2, "label": "Moderate" },
-        { "code": 3, "label": "Severe" },
-        { "code": 4, "label": "Extreme" }
-      ]
-    },
-    {
       "code": "QOL_AWARENESS",
-      "sequence_order": 6,
+      "sequence_order": 5,
       "domain": "qol",
       "prompt_text": "How often are you aware of your knee or hip problem?",
       "answer_options": [
@@ -81,21 +68,8 @@
       ]
     },
     {
-      "code": "QOL_LIFESTYLE",
-      "sequence_order": 7,
-      "domain": "qol",
-      "prompt_text": "How much has your joint problem limited your ability to do your usual activities or hobbies?",
-      "answer_options": [
-        { "code": 0, "label": "None" },
-        { "code": 1, "label": "Mild" },
-        { "code": 2, "label": "Moderate" },
-        { "code": 3, "label": "Severe" },
-        { "code": 4, "label": "Extreme" }
-      ]
-    },
-    {
       "code": "OVERALL_RATING",
-      "sequence_order": 8,
+      "sequence_order": 6,
       "domain": "overall",
       "prompt_text": "Overall, how would you rate the function of your knee or hip today, from 0 being the worst to 10 being the best?",
       "answer_options": [

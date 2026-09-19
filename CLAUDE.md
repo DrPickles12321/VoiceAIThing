@@ -4,19 +4,27 @@ Guidance for Claude Code sessions working in this repository.
 
 ## What this project is
 
-An AI phone-call system that automates patient-reported outcome (PROM) survey collection for
-orthopedic clinics. Read `PRD.md` for the product context and `docs/architecture.md` for the
-technical design before making non-trivial changes — both were written deliberately and reflect
-real product/technical decisions, not placeholders.
+An AI voice conversation system that conducts a standardized 6-question symptom check-in with
+orthopedic or stroke recovery patients (branching by condition), then hands the patient off to
+a separate gait-checking system. Read `PRD.md` for the product context and
+`docs/architecture.md` for the technical design before making non-trivial changes — both were
+written deliberately and reflect real product/technical decisions, not placeholders.
+
+**Pivot note**: the project originally used real Twilio phone calls; it has since pivoted to a
+browser/desktop mic conversation for the hackathon demo (see `docs/architecture.md`). The gait
+checker is a separate, already-built system in another repo — this repo only generates and
+delivers a link to it, it does not implement the gait checker itself.
 
 ## Repo layout
 
-- `spike/` — a throwaway Phase 0 feasibility spike (Twilio + Deepgram STT/TTS + Claude
-  tool-use, one hardcoded question, no persistence). This is intentionally minimal; don't add
-  production concerns (retries, multi-question loops, a database) to it. If/when the spike is
-  validated, its modules seed the equivalents under `packages/server/src/` per
-  `docs/architecture.md`'s target repo structure — do not just keep expanding `spike/` in
-  place.
+- `spike/` — a throwaway Phase 0 feasibility spike. **It currently reflects the pre-pivot
+  Twilio phone-call design**, not the current browser-mic architecture in
+  `docs/architecture.md` — don't treat its transport code as current, though its Claude
+  tool-use mapping pattern (`spike/src/claudeMapper.ts`) still applies. This is intentionally
+  minimal; don't add production concerns (retries, multi-question loops, a database) to it.
+  Its modules seed the equivalents under `packages/server/src/` per `docs/architecture.md`'s
+  target repo structure once updated for the browser transport — do not just keep expanding
+  `spike/` in place.
 - `docs/architecture.md` — system design: call transport, state machine, data model, repo
   structure, risks/fallbacks. Keep it in sync with real implementation decisions as the build
   progresses; don't let it drift into aspirational fiction.
@@ -35,13 +43,13 @@ pattern.
 
 ## Environment limitations to know about
 
-- Twilio and Deepgram's APIs (`api.twilio.com`, `api.deepgram.com`) are **not reachable** from
-  Claude Code's sandboxed remote execution environment — the network policy blocks them. There
-  is also no way to expose a public HTTPS/WSS URL for Twilio's webhooks from inside the
-  sandbox. This means **live phone calls cannot be placed or tested from this environment.**
-  When working on call-flow code here, write and typecheck it, but say plainly that live
-  testing needs to happen locally (or another host with real network access) — don't claim a
-  call was tested if it wasn't actually placed.
+- Deepgram's API (`api.deepgram.com`) is **not reachable** from Claude Code's sandboxed remote
+  execution environment — the network policy blocks it. There is also no real microphone/audio
+  device or browser to test the mic-capture pipeline against inside the sandbox. This means
+  **a live voice conversation cannot be placed or tested from this environment**, browser-based
+  or otherwise. When working on call-flow code here, write and typecheck it, but say plainly
+  that live testing needs to happen locally (or another host with a real browser/mic and
+  network access) — don't claim a conversation was tested if it wasn't actually run.
 - `npm install` against `registry.npmjs.org` and calls to `api.anthropic.com` do work from this
   environment.
 
@@ -49,10 +57,10 @@ pattern.
 
 - Node/TypeScript, ESM (`"type": "module"` + `NodeNext` module resolution) — match this in any
   new package rather than mixing CJS.
-- Audio format: Twilio Media Streams and Deepgram STT/TTS are both configured for raw
-  mu-law/8kHz with no container, so audio can be piped through **without transcoding**. If you
-  touch audio-handling code, preserve this — don't introduce a resampling/transcoding step
-  unless there's a concrete reason.
+- Audio format: the browser mic capture pipeline and Deepgram STT/TTS must agree exactly on
+  encoding and sample rate (see `docs/architecture.md`'s "Call transport" section) so audio can
+  be piped through with minimal transcoding. If you touch audio-handling code, match whatever
+  format the capture pipeline actually produces rather than assuming a fixed rate.
 - Prefer editing existing files under `spike/src/` or `packages/server/src/` (once created)
   over writing new one-off scripts elsewhere in the repo.
 - Keep `spike/README.md` accurate to whatever the spike currently does — it's the run-book for
