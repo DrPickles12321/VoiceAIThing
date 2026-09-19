@@ -82,8 +82,11 @@ call — so both symptom and movement data reach the doctor from a single, guide
    calling and why, before any questions are asked.
 3. **Condition-based question selection**: before asking anything, look up the patient's
    condition category (orthopedic vs. stroke) from the patient record, then ask that
-   category's fixed 6-question set. The AI never mixes sets, never improvises which set to
-   use, and never asks the patient to self-select.
+   category's fixed 6-question set. The orthopedic set is the real, validated **HOOS, JR.**
+   hip instrument (not a hackathon approximation — see `docs/architecture.md`'s question banks
+   section); the stroke set is our own representative approximation until a real equivalent
+   instrument is sourced. The AI never mixes sets, never improvises which set to use, and never
+   asks the patient to self-select.
 4. **Natural free-text answer capture with generous turn-taking**: patients answer in their own
    words, at whatever length feels natural (including rambling). The system waits roughly
    3–4 seconds of silence before assuming the patient is finished, tuned longer than a typical

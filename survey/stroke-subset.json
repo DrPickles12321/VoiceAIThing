@@ -1,6 +1,6 @@
 {
   "survey_code": "STROKE_SUBSET_V1",
-  "description": "Hackathon-representative subset of stroke recovery check-in questions, modeled on domains common to standardized stroke recovery screens (e.g. mobility/balance, weakness/coordination, communication effects, activities-of-daily-living independence, mood, and fall history). This is NOT a validated clinical instrument -- it is a representative 6-question demo set, same caveat as koos-hoos-subset.json.",
+  "description": "Hackathon-representative subset of stroke recovery check-in questions, modeled on domains common to standardized stroke recovery screens (e.g. mobility/balance, weakness/coordination, communication effects, activities-of-daily-living independence, mood, and fall history). This is NOT a validated clinical instrument -- unlike survey/hoos-jr-hip.json (the real HOOS JR instrument), this is our own representative 6-question demo set.",
   "questions": [
     {
       "code": "MOBILITY_WALKING",

@@ -1,0 +1,84 @@
+{
+  "survey_code": "HOOS_JR_V1_HIP",
+  "description": "The real, validated HOOS, JR. (Hip disability and Osteoarthritis Outcome Score for Joint Replacement) instrument, English version 1.0, copyright 2016 Hospital for Special Surgery -- not a hackathon approximation. All 6 items use the same None/Mild/Moderate/Severe/Extreme scale, framed by the source survey as: pain items ask 'What amount of hip pain have you experienced the last week during the following activities?'; function items ask for 'the degree of difficulty you have experienced in the last week due to your hip.' Hip-specific (not knee) -- KOOS JR is this instrument's knee counterpart, not included here. Sourced from the source PDF; production/commercial use of this instrument requires confirming licensing terms with Hospital for Special Surgery, distinct from using it in this hackathon demo for its stated clinical purpose.",
+  "questions": [
+    {
+      "code": "HOOS_STAIRS",
+      "sequence_order": 1,
+      "domain": "pain",
+      "prompt_text": "Over the past week, how much hip pain have you experienced going up or down stairs?",
+      "answer_options": [
+        { "code": 0, "label": "None" },
+        { "code": 1, "label": "Mild" },
+        { "code": 2, "label": "Moderate" },
+        { "code": 3, "label": "Severe" },
+        { "code": 4, "label": "Extreme" }
+      ]
+    },
+    {
+      "code": "HOOS_UNEVEN_SURFACE",
+      "sequence_order": 2,
+      "domain": "pain",
+      "prompt_text": "Over the past week, how much hip pain have you experienced walking on an uneven surface?",
+      "answer_options": [
+        { "code": 0, "label": "None" },
+        { "code": 1, "label": "Mild" },
+        { "code": 2, "label": "Moderate" },
+        { "code": 3, "label": "Severe" },
+        { "code": 4, "label": "Extreme" }
+      ]
+    },
+    {
+      "code": "HOOS_RISING",
+      "sequence_order": 3,
+      "domain": "function",
+      "prompt_text": "Over the past week, how much difficulty have you had rising from sitting because of your hip?",
+      "answer_options": [
+        { "code": 0, "label": "None" },
+        { "code": 1, "label": "Mild" },
+        { "code": 2, "label": "Moderate" },
+        { "code": 3, "label": "Severe" },
+        { "code": 4, "label": "Extreme" }
+      ]
+    },
+    {
+      "code": "HOOS_BENDING",
+      "sequence_order": 4,
+      "domain": "function",
+      "prompt_text": "Over the past week, how much difficulty have you had bending to the floor or picking up an object because of your hip?",
+      "answer_options": [
+        { "code": 0, "label": "None" },
+        { "code": 1, "label": "Mild" },
+        { "code": 2, "label": "Moderate" },
+        { "code": 3, "label": "Severe" },
+        { "code": 4, "label": "Extreme" }
+      ]
+    },
+    {
+      "code": "HOOS_LYING_BED",
+      "sequence_order": 5,
+      "domain": "function",
+      "prompt_text": "Over the past week, how much difficulty have you had lying in bed -- turning over or maintaining your hip position -- because of your hip?",
+      "answer_options": [
+        { "code": 0, "label": "None" },
+        { "code": 1, "label": "Mild" },
+        { "code": 2, "label": "Moderate" },
+        { "code": 3, "label": "Severe" },
+        { "code": 4, "label": "Extreme" }
+      ]
+    },
+    {
+      "code": "HOOS_SITTING",
+      "sequence_order": 6,
+      "domain": "function",
+      "prompt_text": "Over the past week, how much difficulty have you had sitting because of your hip?",
+      "answer_options": [
+        { "code": 0, "label": "None" },
+        { "code": 1, "label": "Mild" },
+        { "code": 2, "label": "Moderate" },
+        { "code": 3, "label": "Severe" },
+        { "code": 4, "label": "Extreme" }
+      ]
+    }
+  ]
+}

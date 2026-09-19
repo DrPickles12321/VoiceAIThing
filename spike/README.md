@@ -2,11 +2,12 @@
 
 Throwaway code proving the riskiest parts of the current design end-to-end, entirely in a
 **browser tab on your own machine**: mic capture → Deepgram STT (live) → Claude forced tool-use
-mapping → Deepgram TTS confirmation, for a doctor introduction plus one hardcoded orthopedic
-PROM question — and then, rather than hanging up, a live gait-checker handoff where the AI
-stays on the line, texts the patient their link, and walks them through getting into position.
-No database, no dashboard, no multi-question loop, no phone call, no condition branching yet —
-just: does this round-trip work, and does it feel like a real, attentive conversation?
+mapping → Deepgram TTS confirmation, for a doctor introduction plus one hardcoded question from
+the real **HOOS, JR.** hip survey (see `survey/hoos-jr-hip.json`) — and then, rather than
+hanging up, a live gait-checker handoff where the AI stays on the line, texts the patient their
+link, and walks them through getting into position. No database, no dashboard, no
+multi-question loop, no phone call, no condition branching yet — just: does this round-trip
+work, and does it feel like a real, attentive conversation?
 
 This previously used a real Twilio phone call; the project pivoted to a browser-mic demo (see
 `docs/architecture.md`), which removes the need for a Twilio *voice* account, ngrok, or a
@@ -33,14 +34,14 @@ now optionally used again, just for the gait-checker link text — see step 5 be
    work; Safari's AudioWorklet support can be flakier). Click **Start call**, allow microphone
    access when prompted.
 
-5. You'll hear a doctor-introduction line, then the question. Answer naturally — try
-   rambling the way a real patient might ("oh you know, some days it's fine, other days going
-   up the stairs after gardening it really acts up...") and **deliberately pause mid-sentence**
-   to check that the system waits for you instead of cutting you off (it's tuned to wait
-   roughly 3–4 seconds of silence before assuming you're done). Watch the on-page log and the
-   server's terminal output: live transcript, Claude's `map_answer` tool call result, and the
-   spoken confirmation ("You said your knee pain was \_\_\_, correct?" — always this exact
-   template).
+5. You'll hear a doctor-introduction line, then the real HOOS JR stairs-pain question. Answer
+   naturally — try rambling the way a real patient might ("oh you know, some days it's fine,
+   other days going up the stairs after gardening it really acts up...") and **deliberately
+   pause mid-sentence** to check that the system waits for you instead of cutting you off (it's
+   tuned to wait roughly 3–4 seconds of silence before assuming you're done). Watch the on-page
+   log and the server's terminal output: live transcript, Claude's `map_answer` tool call
+   result, and the spoken confirmation ("You said your hip pain going up or down stairs was
+   \_\_\_, correct?" — always this exact template).
 
 6. After the thank-you, the call **stays on the line** rather than ending: it texts (or logs,
    if SMS isn't configured) the gait-checker link, tells you it did, then walks you through

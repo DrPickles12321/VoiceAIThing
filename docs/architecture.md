@@ -70,7 +70,7 @@ part) is a deliberate product choice, not just a technical one.
   implementation choice, not decided here) establishing who's calling and why, before any
   question is asked.
 - **LOOKUP_CONDITION**: reads the patient's `condition_category` (`'orthopedic' | 'stroke'`)
-  and selects the matching 6-question set — `survey/koos-hoos-subset.json` for orthopedic,
+  and selects the matching 6-question set — `survey/hoos-jr-hip.json` for orthopedic,
   `survey/stroke-subset.json` for stroke (see "Question banks" below). This choice is made
   once, from the patient record, never asked to the patient and never improvised.
 - **LISTENING**: stream patient audio to Deepgram STT until the tuned silence/endpointing gap
@@ -111,7 +111,14 @@ part) is a deliberate product choice, not just a technical one.
   the gait checker's own capture — it's purely a timed pause plus a closing remark, e.g. *"Great,
   thank you!"*), then `HANGUP`. The gait checker's own page is what actually captures/analyzes
   the walk; this state exists to keep the call itself feeling attentive, not to do any gait
-  analysis on the voice side.
+  analysis on the voice side. **Be honest about what this currently is**: a fixed-duration
+  timer (`spike/`'s is 5 seconds), not an adaptive wait — the AI has no signal for whether the
+  patient has actually opened the link, granted camera permission, and gotten into position, all
+  of which realistically take longer than a few seconds. Fine as a hackathon simplification
+  (predictable, easy to rehearse), but it should be described as "the AI waits a bit" rather
+  than "the AI waits for the patient to be ready." A real fix would have the gait checker's page
+  push a "camera ready" signal back (e.g. over a small webhook or shared realtime channel) that
+  this state actually waits on — noted as a stretch idea, not built now.
 - **PERSIST**: after `HANGUP`, submit the call's data — survey answers plus a
   `walkthrough_completed` flag (see "Integration contract" below) — to the gait checker's
   backend in one request, and save the full transcript/structured answers to our own Supabase
@@ -218,8 +225,8 @@ create table patients (
 
 create table survey_questions (
   id uuid primary key default gen_random_uuid(),
-  question_set_code text not null,     -- 'KOOS_HOOS_SUBSET_V1' | 'STROKE_SUBSET_V1'
-  code text unique not null,           -- e.g. 'KOOS_PAIN_1'
+  question_set_code text not null,     -- 'HOOS_JR_V1_HIP' | 'STROKE_SUBSET_V1'
+  code text unique not null,           -- e.g. 'HOOS_STAIRS'
   sequence_order int not null,
   domain text not null,                -- e.g. 'pain' | 'stiffness' | 'function' | 'qol' (orthopedic), or 'mobility' | 'balance' | ... (stroke)
   prompt_text text not null,           -- what the AI says on the call
@@ -269,15 +276,19 @@ answers and gait telemetry are merged into the doctor-facing clinical report, no
 
 ## Question banks
 
-- `survey/koos-hoos-subset.json` — orthopedic knee/hip PROM, trimmed to the **6** questions
-  that matter most for the demo (down from an earlier 8-question draft): pain, stiffness,
-  walking difficulty, stair difficulty, quality-of-life awareness, and an overall 0–10 rating.
-- `survey/stroke-subset.json` — a **new**, hackathon-representative 6-question set modeled on
-  domains common to standardized stroke recovery screens (e.g. mobility/balance,
+- `survey/hoos-jr-hip.json` — the **real, validated HOOS, JR.** (Hip disability and
+  Osteoarthritis Outcome Score for Joint Replacement) instrument, English version 1.0,
+  ©2016 Hospital for Special Surgery — not a hackathon approximation. All 6 items share one
+  None/Mild/Moderate/Severe/Extreme scale: pain going up/down stairs and on uneven surfaces;
+  difficulty rising from sitting, bending to the floor, lying in bed, and sitting. It's
+  hip-specific (KOOS JR is this instrument's knee counterpart, not included here). Production
+  or commercial use would need licensing terms confirmed with Hospital for Special Surgery —
+  distinct from using it in this demo for its stated clinical purpose.
+- `survey/stroke-subset.json` — a hackathon-representative 6-question set modeled on domains
+  common to standardized stroke recovery screens (e.g. mobility/balance,
   weakness/coordination, speech/communication effects, activities-of-daily-living
-  independence, mood, and fall history). Like the orthopedic file, this is explicitly a
-  hackathon-representative subset, not a clinically validated instrument — flagged as such in
-  the file itself.
+  independence, mood, and fall history). Unlike the HOOS JR file, this one is **not** a real
+  named validated instrument — it's our own approximation, flagged as such in the file itself.
 - Both are seeded into `survey_questions`, scoped by `question_set_code`, and selected at
   `LOOKUP_CONDITION` based on the patient's `condition_category`.
 
@@ -290,7 +301,7 @@ VoiceAIThing/
 ├── CLAUDE.md
 ├── docs/architecture.md
 ├── survey/
-│   ├── koos-hoos-subset.json   # orthopedic, 6 questions
+│   ├── hoos-jr-hip.json        # orthopedic (hip), real HOOS JR instrument, 6 questions
 │   └── stroke-subset.json      # stroke, 6 questions
 ├── packages/
 │   ├── server/                 # Express/Fastify + ws

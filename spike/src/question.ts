@@ -1,7 +1,7 @@
 // Single hardcoded PROM question for the Phase 0 spike, plus a doctor-introduction
 // opener (see docs/architecture.md's DOCTOR_INTRO state). The full build looks up the
 // patient's condition_category and asks a full 6-question set from
-// survey/koos-hoos-subset.json or survey/stroke-subset.json instead.
+// survey/hoos-jr-hip.json or survey/stroke-subset.json instead.
 
 export interface AnswerOption {
   code: number;
@@ -10,7 +10,7 @@ export interface AnswerOption {
 
 export interface PromQuestion {
   code: string;
-  // Short phrase naming what's being confirmed, e.g. "knee pain" -- used to fill in the
+  // Short phrase naming what's being confirmed, e.g. "hip pain" -- used to fill in the
   // standard confirmation template ("You said your <topic> was <answer>, correct?").
   topic: string;
   promptText: string;
@@ -18,7 +18,7 @@ export interface PromQuestion {
 }
 
 export const DOCTOR_INTRO_TEXT =
-  "Hi, this is Dr. Rivera's office calling to check in on how your knee has been doing. " +
+  "Hi, this is Dr. Rivera's office calling to check in on how your hip has been doing. " +
   "I'm going to ask you a quick question about it -- take your time answering, there's no rush at all.";
 
 // Closing script played after the last question is confirmed (see docs/architecture.md's
@@ -49,11 +49,12 @@ export const WALKTHROUGH_COUNTDOWN_TEXT =
 // since the voice side has no visibility into the gait checker's own camera feed.
 export const WALKTHROUGH_CLOSING_TEXT = "Great, thank you! Take care.";
 
+// The real first item of the HOOS, JR. hip survey (see survey/hoos-jr-hip.json) -- English
+// version 1.0, copyright 2016 Hospital for Special Surgery. Not a hackathon approximation.
 export const SPIKE_QUESTION: PromQuestion = {
-  code: "PAIN_1",
-  topic: "knee pain",
-  promptText:
-    "Over the past week, how would you describe your knee pain during activities like walking or climbing stairs?",
+  code: "HOOS_STAIRS",
+  topic: "hip pain going up or down stairs",
+  promptText: "Over the past week, how much hip pain have you experienced going up or down stairs?",
   answerOptions: [
     { code: 0, label: "None" },
     { code: 1, label: "Mild" },
