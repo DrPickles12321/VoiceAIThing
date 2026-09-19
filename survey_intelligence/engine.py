@@ -26,7 +26,11 @@ class SurveyEngine:
             raise RuntimeError("A session can only be started once.")
         question = self.session.current_question
         self.session.state = SurveyState.LISTENING if question else SurveyState.COMPLETE
-        return question.prompt if question else "Survey complete."
+        if question is None:
+            return "Survey complete."
+        return "\n\n".join(part for part in (
+            self.session.survey.title, self.session.survey.instructions, question.prompt
+        ) if part)
 
     def _clear_pending(self):
         self.session.pending_extraction = None
@@ -133,6 +137,10 @@ class SurveyEngine:
 
     def snapshot(self) -> dict[str, object]:
         return {
+            "survey_id": self.session.survey.id,
+            "survey_title": self.session.survey.title,
+            "answered_count": len(self.session.responses),
+            "question_count": len(self.session.survey.questions),
             "state": self.session.state.value,
             "current_question": self.session.current_question.id if self.session.current_question else None,
             "responses": {key: {**asdict(value), "confirmed": True} for key, value in self.session.responses.items()},

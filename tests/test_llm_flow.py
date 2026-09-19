@@ -6,12 +6,16 @@ import httpx
 import pytest
 from openai import APITimeoutError, OpenAI
 
-from demo import SURVEY
-from survey_intelligence import SurveyEngine
+from survey_intelligence import SurveyEngine, SurveyDefinition, SurveyQuestion
 from survey_intelligence.extractor import ExtractionError
 from survey_intelligence.models import Extraction
 from survey_intelligence.openai_extractor import OpenAIExtractor
 from survey_intelligence.service import SurveyService
+
+SURVEY = SurveyDefinition("test", (
+    SurveyQuestion("stairs", "How are stairs?", ("none", "mild", "moderate", "severe", "extreme")),
+    SurveyQuestion("pain_walking", "How is walking?", ("none", "mild", "moderate", "severe", "extreme")),
+))
 
 
 def response(value="severe", evidence="severe", **overrides):

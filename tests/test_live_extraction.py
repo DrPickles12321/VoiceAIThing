@@ -7,7 +7,7 @@ import os
 import pytest
 from dotenv import load_dotenv
 
-from demo import SURVEY
+from survey_intelligence.surveys import HOOS_JR as SURVEY
 from survey_intelligence.openai_extractor import OpenAIExtractor
 
 load_dotenv()
@@ -16,9 +16,9 @@ load_dotenv()
 @pytest.mark.live
 @pytest.mark.skipif(os.getenv("RUN_LIVE_LLM_TESTS") != "1", reason="Live API calls are opt-in")
 @pytest.mark.parametrize("text,expected", [
-    ("Stairs are severe. I have to stop every few steps. Walking is mild.", "severe"),
-    ("Not severe. My difficulty on stairs is mild.", "mild"),
-    ("Severe. Sorry, I meant moderate difficulty with stairs.", "moderate"),
+    ("My hip pain on stairs was severe this past week. Walking was mild.", "severe"),
+    ("Not severe. My hip pain on stairs was mild last week.", "mild"),
+    ("Severe. Sorry, I meant moderate hip pain with stairs last week.", "moderate"),
     ("Sometimes mild, sometimes severe. I can't pick one.", None),
     ("Should I take more medication?", None),
     ("Walking is mild. I haven't tried stairs.", None),

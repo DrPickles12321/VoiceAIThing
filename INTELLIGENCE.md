@@ -1,6 +1,11 @@
 # Survey intelligence
 
-Python 3.10+. Questions in demo.py are illustrative, not a validated clinical instrument.
+Python 3.10+. The demo uses all six HOOS, JR. HIP SURVEY items from the supplied
+image in their original order. Definitions are in `survey_intelligence/surveys.py`.
+Spoken prompts combine each section stem with its item: two hip-pain questions
+and four physical-function questions, all referring to the last week. Choices
+are None, Mild, Moderate, Severe, and Extreme. Instructions are adapted from
+ticking boxes to spoken answers. No clinical score or interval conversion is implemented.
 
 ## Setup and run
 
@@ -25,11 +30,11 @@ RUN_LIVE_LLM_TESTS=1 python -m pytest -m live  # Seven paid synthetic evaluation
 ## Backend / voice handoff
 
 ```python
-from demo import SURVEY
+from survey_intelligence.surveys import HOOS_JR
 from survey_intelligence.openai_extractor import OpenAIExtractor
 from survey_intelligence.service import SurveyService
 
-service = SurveyService(SURVEY, OpenAIExtractor())
+service = SurveyService(HOOS_JR, OpenAIExtractor())
 first = service.create_session()
 turn = service.handle_turn(first['session_id'], 'My difficulty is severe')
 confirmed = service.handle_turn(first['session_id'], 'Yes')

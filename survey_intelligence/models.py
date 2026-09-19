@@ -28,6 +28,8 @@ class SurveyQuestion:
 class SurveyDefinition:
     id: str
     questions: tuple[SurveyQuestion, ...]
+    title: str = ""
+    instructions: str = ""
 
 
 @dataclass(frozen=True)

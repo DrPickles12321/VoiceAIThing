@@ -1,21 +1,16 @@
-from survey_intelligence import SurveyDefinition, SurveyEngine, SurveyQuestion
+from survey_intelligence import SurveyEngine
+from survey_intelligence.surveys import HOOS_JR
 
 
-SURVEY = SurveyDefinition(
-    id="knee-outcomes-demo",
-    questions=(
-        SurveyQuestion("stairs", "How much difficulty do you have going up or down stairs?", ("none", "mild", "moderate", "severe", "extreme")),
-        SurveyQuestion("pain_walking", "How much pain do you experience while walking?", ("none", "mild", "moderate", "severe", "extreme")),
-    ),
-)
+SURVEY = HOOS_JR
 
 
 if __name__ == "__main__":
     engine = SurveyEngine(SURVEY)
     print("ASSISTANT:", engine.start())
-    transcript = "Oh god, stairs are terrible. I have to pull myself up using the railing."
-    print("PATIENT:", transcript)
-    print("ASSISTANT:", engine.receive_transcript(transcript))
-    print("PATIENT: Yeah")
-    print("ASSISTANT:", engine.confirm("Yeah", "Yeah"))
+    for answer in ("mild", "moderate", "severe", "mild", "none", "moderate"):
+        print("PATIENT:", answer)
+        print("ASSISTANT:", engine.handle_turn(answer))
+        print("PATIENT: Yes")
+        print("ASSISTANT:", engine.handle_turn("Yes"))
     print("SNAPSHOT:", engine.snapshot())

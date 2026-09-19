@@ -1,10 +1,11 @@
 """Run python chat_demo.py, or python chat_demo.py --offline."""
 import argparse
 import os
+import json
 
 from dotenv import load_dotenv
 
-from demo import SURVEY
+from survey_intelligence.surveys import HOOS_JR
 from survey_intelligence.extractor import keyword_extractor
 from survey_intelligence.service import SurveyService
 
@@ -24,17 +25,18 @@ def main():
         extractor = keyword_extractor
     else:
         parser.error("SURVEY_EXTRACTOR must be openai or keyword")
-    service = SurveyService(SURVEY, extractor)
+    service = SurveyService(HOOS_JR, extractor)
     turn = service.create_session()
     print(turn["prompt"])
     while turn["state"] not in {"complete", "escalated", "stopped"}:
+        print(f"[{turn['answered_count']} of {turn['question_count']} answers confirmed]")
         try:
             transcript = input("> ")
         except (EOFError, KeyboardInterrupt):
             break
         turn = service.handle_turn(turn["session_id"], transcript)
         print(turn["prompt"])
-    print(turn)
+    print(json.dumps(turn, indent=2))
 
 
 if __name__ == "__main__":
