@@ -9,7 +9,7 @@ export function buildPatientLink(patientCode: string): string {
   return `${env.GAIT_CHECKER_BASE_URL}/patient/${encodeURIComponent(patientCode)}`;
 }
 
-interface AnsweredQuestion {
+export interface AnsweredQuestion {
   question: PromQuestion;
   mapped: MappedAnswer;
 }

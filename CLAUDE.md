@@ -17,14 +17,18 @@ delivers a link to it, it does not implement the gait checker itself.
 
 ## Repo layout
 
-- `spike/` — a throwaway Phase 0 feasibility spike, now updated for the browser-mic
-  architecture in `docs/architecture.md`: a static page (`spike/public/`) captures mic audio
-  via an `AudioWorklet` and streams it to `spike/src/server.ts` over a WebSocket, which bridges
-  to Deepgram STT/TTS and Claude the same way the target `packages/server/` design will. It's
-  intentionally minimal (one hardcoded question, no persistence, no condition branching yet);
-  don't add production concerns (retries, multi-question loops, a database) to it. Its modules
-  seed the equivalents under `packages/server/src/` per `docs/architecture.md`'s target repo
-  structure — do not just keep expanding `spike/` in place.
+- `spike/` — started as a throwaway Phase 0 feasibility spike but, by explicit request, now
+  implements most of the full design: a static page (`spike/public/`) captures mic audio via
+  an `AudioWorklet` and streams it to `spike/src/server.ts` over a WebSocket, which bridges to
+  Deepgram STT/TTS and Claude; `conditionLookup.ts` + `questionSets.ts` branch between the real
+  HOOS JR (orthopedic) and representative stroke question sets via a real Supabase `patients`
+  lookup; the full per-question loop includes confirmation classification and bounded
+  clarification retries; and `PERSIST` writes `calls`/`call_responses`/`gait_check_links` rows
+  and submits to the gait checker. It is **no longer minimal** — this note replaces an earlier
+  version of itself that said the opposite. `packages/server/` (per `docs/architecture.md`'s
+  target repo structure) still doesn't exist as a separate package; this functionality
+  currently lives in `spike/`. What's still missing: a real dashboard/review UI and any
+  automation for triggering calls (still manual, one browser tab at a time).
 - `docs/architecture.md` — system design: call transport, state machine, data model, repo
   structure, risks/fallbacks. Keep it in sync with real implementation decisions as the build
   progresses; don't let it drift into aspirational fiction.
@@ -52,6 +56,12 @@ pattern.
   network access) — don't claim a conversation was tested if it wasn't actually run.
 - `npm install` against `registry.npmjs.org` and calls to `api.anthropic.com` do work from this
   environment.
+- Direct HTTP calls to Supabase's REST API (`*.supabase.co`) are also blocked (same network
+  policy) — a script that calls `@supabase/supabase-js` directly (e.g. `spike/scripts/seed.ts`)
+  can't run from here either. The **Supabase MCP tools** (`mcp__Supabase__*`) are a separate,
+  allowed channel for schema/data operations (they don't go through the blocked network path) —
+  use those for migrations, seeding, and verification queries instead of running scripts that
+  hit the database directly.
 
 ## Conventions
 

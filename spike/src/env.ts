@@ -17,6 +17,11 @@ const envSchema = z.object({
   TWILIO_ACCOUNT_SID: z.string().optional(),
   TWILIO_AUTH_TOKEN: z.string().optional(),
   TWILIO_SMS_FROM_NUMBER: z.string().optional(),
+
+  // Supabase persistence (see docs/architecture.md's data model). RLS is left permissive for
+  // the hackathon demo, so the anon key is sufficient for both reads and writes here.
+  SUPABASE_URL: z.string().url(),
+  SUPABASE_ANON_KEY: z.string().min(1),
 });
 
 export const env = envSchema.parse(process.env);

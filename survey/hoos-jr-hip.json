@@ -6,6 +6,7 @@
       "code": "HOOS_STAIRS",
       "sequence_order": 1,
       "domain": "pain",
+      "topic": "hip pain going up or down stairs",
       "prompt_text": "Over the past week, how much hip pain have you experienced going up or down stairs?",
       "answer_options": [
         { "code": 0, "label": "None" },
@@ -19,6 +20,7 @@
       "code": "HOOS_UNEVEN_SURFACE",
       "sequence_order": 2,
       "domain": "pain",
+      "topic": "hip pain walking on an uneven surface",
       "prompt_text": "Over the past week, how much hip pain have you experienced walking on an uneven surface?",
       "answer_options": [
         { "code": 0, "label": "None" },
@@ -32,6 +34,7 @@
       "code": "HOOS_RISING",
       "sequence_order": 3,
       "domain": "function",
+      "topic": "difficulty rising from sitting",
       "prompt_text": "Over the past week, how much difficulty have you had rising from sitting because of your hip?",
       "answer_options": [
         { "code": 0, "label": "None" },
@@ -45,6 +48,7 @@
       "code": "HOOS_BENDING",
       "sequence_order": 4,
       "domain": "function",
+      "topic": "difficulty bending to the floor or picking up an object",
       "prompt_text": "Over the past week, how much difficulty have you had bending to the floor or picking up an object because of your hip?",
       "answer_options": [
         { "code": 0, "label": "None" },
@@ -58,6 +62,7 @@
       "code": "HOOS_LYING_BED",
       "sequence_order": 5,
       "domain": "function",
+      "topic": "difficulty lying in bed",
       "prompt_text": "Over the past week, how much difficulty have you had lying in bed -- turning over or maintaining your hip position -- because of your hip?",
       "answer_options": [
         { "code": 0, "label": "None" },
@@ -71,6 +76,7 @@
       "code": "HOOS_SITTING",
       "sequence_order": 6,
       "domain": "function",
+      "topic": "difficulty sitting",
       "prompt_text": "Over the past week, how much difficulty have you had sitting because of your hip?",
       "answer_options": [
         { "code": 0, "label": "None" },

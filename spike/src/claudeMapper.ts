@@ -89,3 +89,55 @@ export async function mapAnswer(
 
   return toolUse.input as MappedAnswer;
 }
+
+export interface ConfirmationClassification {
+  confirmed: boolean;
+}
+
+// Classifies the patient's spoken reply to a "You said your X was Y, correct?" confirmation
+// as yes/no. Same forced-tool-use pattern as mapAnswer -- the model can only return a boolean,
+// never free-chat back to the patient.
+export async function classifyConfirmation(
+  patientReply: string,
+): Promise<ConfirmationClassification> {
+  const response = await anthropic.messages.create({
+    model: env.ANTHROPIC_MODEL,
+    max_tokens: 100,
+    system:
+      "You classify whether a patient's spoken reply confirms or rejects a yes/no question " +
+      "asked of them. You never chat, you only call the classify_confirmation tool.",
+    messages: [
+      {
+        role: "user",
+        content:
+          `The patient was asked to confirm a statement about their survey answer. ` +
+          `Their reply (transcribed): "${patientReply}"\n\n` +
+          "Did they confirm (yes) or reject (no) the statement?",
+      },
+    ],
+    tool_choice: { type: "tool", name: "classify_confirmation" },
+    tools: [
+      {
+        name: "classify_confirmation",
+        description: "Record whether the patient confirmed or rejected the statement.",
+        input_schema: {
+          type: "object",
+          properties: {
+            confirmed: {
+              type: "boolean",
+              description: "true if the patient confirmed (e.g. 'yes', 'that's right'), false if they rejected it (e.g. 'no', 'that's not right').",
+            },
+          },
+          required: ["confirmed"],
+        },
+      },
+    ],
+  });
+
+  const toolUse = response.content.find((block) => block.type === "tool_use");
+  if (!toolUse || toolUse.type !== "tool_use") {
+    throw new Error("Claude did not return the forced classify_confirmation tool call.");
+  }
+
+  return toolUse.input as ConfirmationClassification;
+}

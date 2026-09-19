@@ -203,8 +203,9 @@ repo: the gait checker's own capture/analysis/reporting, the doctor's portal its
 anything back from that system (their backend is the merge point, not ours — see
 `docs/architecture.md`'s integration contract), scheduling automation for when calls go out,
 opt-out flows, EHR integration, and clinical risk triage.
-See `docs/architecture.md` for the technical plan and `spike/README.md` for the current Phase 0
-feasibility spike status (the spike already runs the browser-mic conversation with the doctor
-intro, standard confirmation template, closing thank-you, and the full guided gait-checker
-handoff from requirement 8 above; it does not yet implement condition branching or the full
-6-question loop).
+See `docs/architecture.md` for the technical plan and `spike/README.md` for the current status
+(the spike now implements nearly everything above — the browser-mic conversation, doctor
+intro, condition branching via a real Supabase patient lookup, the full 6-question loop with
+confirmation and bounded clarification retries, the closing thank-you, the full guided
+gait-checker handoff, and Supabase persistence. Still missing: a real review dashboard and any
+call-triggering automation).

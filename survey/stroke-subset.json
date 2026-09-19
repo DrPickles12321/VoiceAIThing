@@ -6,78 +6,174 @@
       "code": "MOBILITY_WALKING",
       "sequence_order": 1,
       "domain": "mobility",
+      "topic": "difficulty walking around your home or outside",
       "prompt_text": "Over the past week, how much difficulty have you had walking around your home or outside?",
       "answer_options": [
-        { "code": 0, "label": "None" },
-        { "code": 1, "label": "Mild" },
-        { "code": 2, "label": "Moderate" },
-        { "code": 3, "label": "Severe" },
-        { "code": 4, "label": "Unable" }
+        {
+          "code": 0,
+          "label": "None"
+        },
+        {
+          "code": 1,
+          "label": "Mild"
+        },
+        {
+          "code": 2,
+          "label": "Moderate"
+        },
+        {
+          "code": 3,
+          "label": "Severe"
+        },
+        {
+          "code": 4,
+          "label": "Unable"
+        }
       ]
     },
     {
       "code": "BALANCE_1",
       "sequence_order": 2,
       "domain": "balance",
+      "topic": "feeling unsteady or losing your balance",
       "prompt_text": "Have you felt unsteady or lost your balance while standing or walking this past week?",
       "answer_options": [
-        { "code": 0, "label": "Never" },
-        { "code": 1, "label": "Rarely" },
-        { "code": 2, "label": "Sometimes" },
-        { "code": 3, "label": "Often" },
-        { "code": 4, "label": "Constantly" }
+        {
+          "code": 0,
+          "label": "Never"
+        },
+        {
+          "code": 1,
+          "label": "Rarely"
+        },
+        {
+          "code": 2,
+          "label": "Sometimes"
+        },
+        {
+          "code": 3,
+          "label": "Often"
+        },
+        {
+          "code": 4,
+          "label": "Constantly"
+        }
       ]
     },
     {
       "code": "WEAKNESS_COORDINATION",
       "sequence_order": 3,
       "domain": "weakness_coordination",
+      "topic": "weakness or clumsiness in your arm or leg",
       "prompt_text": "How much weakness or clumsiness have you noticed in your arm or leg on one side of your body?",
       "answer_options": [
-        { "code": 0, "label": "None" },
-        { "code": 1, "label": "Mild" },
-        { "code": 2, "label": "Moderate" },
-        { "code": 3, "label": "Severe" },
-        { "code": 4, "label": "Extreme" }
+        {
+          "code": 0,
+          "label": "None"
+        },
+        {
+          "code": 1,
+          "label": "Mild"
+        },
+        {
+          "code": 2,
+          "label": "Moderate"
+        },
+        {
+          "code": 3,
+          "label": "Severe"
+        },
+        {
+          "code": 4,
+          "label": "Extreme"
+        }
       ]
     },
     {
       "code": "COMMUNICATION_1",
       "sequence_order": 4,
       "domain": "communication",
+      "topic": "difficulty finding words or being understood",
       "prompt_text": "Have you had any difficulty finding words or being understood when speaking with others this past week?",
       "answer_options": [
-        { "code": 0, "label": "None" },
-        { "code": 1, "label": "Mild" },
-        { "code": 2, "label": "Moderate" },
-        { "code": 3, "label": "Severe" },
-        { "code": 4, "label": "Extreme" }
+        {
+          "code": 0,
+          "label": "None"
+        },
+        {
+          "code": 1,
+          "label": "Mild"
+        },
+        {
+          "code": 2,
+          "label": "Moderate"
+        },
+        {
+          "code": 3,
+          "label": "Severe"
+        },
+        {
+          "code": 4,
+          "label": "Extreme"
+        }
       ]
     },
     {
       "code": "ADL_INDEPENDENCE",
       "sequence_order": 5,
       "domain": "adl",
+      "topic": "how much help you've needed with everyday tasks",
       "prompt_text": "How much help have you needed from another person with everyday tasks like dressing, bathing, or preparing food?",
       "answer_options": [
-        { "code": 0, "label": "None" },
-        { "code": 1, "label": "A little" },
-        { "code": 2, "label": "Moderate" },
-        { "code": 3, "label": "A lot" },
-        { "code": 4, "label": "Complete" }
+        {
+          "code": 0,
+          "label": "None"
+        },
+        {
+          "code": 1,
+          "label": "A little"
+        },
+        {
+          "code": 2,
+          "label": "Moderate"
+        },
+        {
+          "code": 3,
+          "label": "A lot"
+        },
+        {
+          "code": 4,
+          "label": "Complete"
+        }
       ]
     },
     {
       "code": "FALL_HISTORY",
       "sequence_order": 6,
       "domain": "fall_history",
+      "topic": "falls or near-falls",
       "prompt_text": "Have you had any falls, or any close calls where you almost fell, since we last checked in?",
       "answer_options": [
-        { "code": 0, "label": "No falls or near-falls" },
-        { "code": 1, "label": "One near-fall, no fall" },
-        { "code": 2, "label": "Multiple near-falls, no fall" },
-        { "code": 3, "label": "One fall" },
-        { "code": 4, "label": "Multiple falls" }
+        {
+          "code": 0,
+          "label": "No falls or near-falls"
+        },
+        {
+          "code": 1,
+          "label": "One near-fall, no fall"
+        },
+        {
+          "code": 2,
+          "label": "Multiple near-falls, no fall"
+        },
+        {
+          "code": 3,
+          "label": "One fall"
+        },
+        {
+          "code": 4,
+          "label": "Multiple falls"
+        }
       ]
     }
   ]

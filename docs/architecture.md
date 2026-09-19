@@ -1,12 +1,15 @@
 # Architecture
 
 See `PRD.md` for the product context. This describes the technical plan for the full build.
-`spike/` is a Phase 0 proof of concept already updated for the browser-mic transport described
-below, including the doctor intro, standard confirmation template, closing script, and the full
-live gait-checker handoff (SMS link, walkthrough guidance/countdown, and the end-of-call survey
-submission) — see `spike/README.md`. It does not yet implement condition branching or the full
-6-question loop (still one hardcoded question); those are the next pieces to build on top of
-it.
+`spike/` started as a Phase 0 proof of concept but now implements nearly everything described
+below: the browser-mic transport, doctor intro, condition branching via a real Supabase
+`patients` lookup, the full 6-question loop (both the HOOS JR and stroke sets) with confirmation
+classification and bounded clarification retries, the standard confirmation template, closing
+script, the full live gait-checker handoff (SMS link, walkthrough guidance/countdown, survey
+submission), and Supabase persistence (`calls`, `call_responses`, `gait_check_links`) — see
+`spike/README.md`. What's still missing: a real review dashboard and any automation for
+triggering calls (`packages/server/`/`packages/dashboard/` per the target repo structure below
+don't exist yet as separate packages).
 
 ## Call transport (browser, not telephony)
 
@@ -210,6 +213,13 @@ Content-Type: application/json
   route before wiring up real code.
 
 ## Data model (Supabase / Postgres)
+
+**This schema is provisioned** — a Supabase project (`voiceaithing-hackmit`) exists with this
+exact schema applied and RLS enabled with permissive "allow all" policies (functionally the
+same as the "left permissive" note below, without triggering Supabase's "RLS disabled" security
+advisory). `spike/.env.example` has the real `SUPABASE_URL`/`SUPABASE_ANON_KEY` for it — see
+`spike/README.md` for seeding. It's a hackathon-only project with no real patient data (two
+demo patients: `RGN-0417` orthopedic, `RGN-0500` stroke).
 
 ```sql
 create table patients (

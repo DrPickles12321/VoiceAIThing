@@ -23,16 +23,18 @@ Built for HackMIT (Healthcare / Deepgram / Regeneron tracks).
 
 The project pivoted from real Twilio phone calls to a **browser/desktop mic conversation** for
 the hackathon demo, and split into two connected pieces: this repo (the voice call) and a
-separate, already-built gait-checker system that this repo only links out to.
+separate, already-built gait-checker system (working name **GaitGuard**) that this repo submits
+survey data to and links out to.
 
-[`spike/`](./spike) is a Phase 0 feasibility spike that now runs entirely in a browser tab
-(no phone, no Twilio, no ngrok) — mic capture, Deepgram STT/TTS, and Claude tool-use mapping,
-for a doctor intro plus one hardcoded question. See [`spike/README.md`](./spike/README.md) to
-run it.
+[`spike/`](./spike) started as a Phase 0 feasibility spike but now implements nearly the full
+system: browser mic capture (no phone, no Twilio voice), the full 6-question loop branching
+between the real **HOOS, JR.** hip instrument and a representative stroke set via a real
+Supabase patient lookup, confirmation + bounded clarification retries, and the full live
+gait-checker handoff (SMS link, walkthrough guidance, Supabase persistence, survey submission).
+See [`spike/README.md`](./spike/README.md) to run it.
 
-The full build (browser-based state machine, condition-based question branching, Supabase
-storage, review dashboard, gait-checker link handoff) follows the plan in
-`docs/architecture.md`.
+Still missing: a real review dashboard and any call-triggering automation — see
+`docs/architecture.md` and `CLAUDE.md` for exactly what's built vs. not.
 
 ## License
 
