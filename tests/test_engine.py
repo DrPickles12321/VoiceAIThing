@@ -6,10 +6,10 @@ def make_engine() -> SurveyEngine:
     return SurveyEngine(SurveyDefinition("test", (SurveyQuestion("stairs", "How are stairs?", ("none", "mild", "moderate", "severe", "extreme")),)))
 
 
-def test_rambling_answer_requires_confirmation_before_save() -> None:
+def test_explicit_answer_requires_confirmation_before_save() -> None:
     engine = make_engine()
     engine.start()
-    prompt = engine.receive_transcript("Stairs are terrible and I need to pull myself up using the railing.")
+    prompt = engine.receive_transcript("Severe  .")
     assert engine.session.state == SurveyState.CONFIRMING
     assert "severe" in prompt
     assert engine.session.responses == {}
