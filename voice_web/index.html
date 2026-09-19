@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>VoiceAIThing desktop survey</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main>
+      <h1>VoiceAIThing</h1>
+      <p class="muted">Desktop voice survey demo powered by Deepgram transcription.</p>
+
+      <label for="patient">Patient code</label>
+      <div class="row">
+        <input id="patient" value="RGN-0417" autocomplete="off">
+        <button id="start">Start survey</button>
+      </div>
+
+      <section id="conversation" aria-live="polite"></section>
+      <button id="record" disabled>Start recording</button>
+      <p id="status" class="muted">Start a survey to begin.</p>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

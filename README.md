@@ -60,6 +60,27 @@ python -m pytest -q
 
 The repo is intentionally designed as a staged, reviewable stack rather than a giant one-shot rewrite.
 
+## Desktop voice demo with Deepgram
+
+The local voice app uses the browser microphone, sends each recording to the
+local Python server, transcribes it with Deepgram, and speaks the survey reply
+with the browser's built-in speech synthesis. The Deepgram key stays on the
+server.
+
+```bash
+cp .env.example .env
+# Edit .env and set DEEPGRAM_API_KEY
+python voice_app.py
+```
+
+Open <http://127.0.0.1:8000>, allow microphone access, choose a patient code,
+and click **Start recording** for each answer. Use `RGN-0417` for the
+orthopedic/HOOS JR branch or `RGN-0500` for the stroke branch.
+
+This is a local turn-based desktop demo, not a phone system. It does not yet
+stream audio continuously, provide adaptive silence detection, send a real gait
+link, or persist to a remote database.
+
 ## Older project docs
 
 The package formerly used a different prototype system under `survey_intelligence/` and `web_app.py`. Those files still exist as historical/demo code, but the safe runtime in `app/` is the path to keep for ongoing work.
