@@ -47,8 +47,10 @@ independently choose questions, rewrite responses, or call `confirm('yes')` base
 on its own interpretation. Rejecting a candidate requests a fresh answer.
 Mixed confirmations such as "yes, actually no" remain unconfirmed.
 
-This is an in-process service, not an HTTP server. Your backend teammate can wrap
-it in authenticated FastAPI routes. Methods are synchronous: use a thread worker
+`SurveyService` is an in-process service. `web_app.py` now wraps it in local
+FastAPI endpoints for the temporary chatbot (run `python web_app.py`). The
+frontend is in `web/`. The local demo endpoints are not authenticated.
+Methods are synchronous: use a thread worker
 from async code. Per-session locks serialize turns within one process. Session
 storage is in memory and disappears on restart. Multiworker deployments need
 transactional shared storage; transport retries need event IDs/idempotency.
@@ -96,7 +98,7 @@ synthetic statements. Review failures before switching the configurable model.
 
 Another provider can implement the same `(transcript, question) -> Extraction`
 callable, raising `ExtractionError` on expected failures. Meta is not wired yet.
-No database, telephony, survey scoring or HTTP deployment is included.
+No database, telephony, survey scoring or public deployment is included.
 
 API references: [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
 and [GPT-4.1 mini](https://developers.openai.com/api/docs/models/gpt-4.1-mini).
