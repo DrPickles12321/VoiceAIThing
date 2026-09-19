@@ -1,82 +1,140 @@
 from __future__ import annotations
 
-from .extractor import Extractor, keyword_extractor
+from dataclasses import asdict
+import math
+import re
+
+from .extractor import Extractor, ExtractionError, keyword_extractor
 from .guardrails import detect_safety_flag
-from .models import ConfirmedResponse, SurveyDefinition, SurveySession, SurveyState
+from .models import ConfirmedResponse, Extraction, SurveyDefinition, SurveySession, SurveyState
+
+TERMINAL = {SurveyState.COMPLETE, SurveyState.ESCALATED, SurveyState.STOPPED}
 
 
 class SurveyEngine:
-    """Owns progression, validation, confirmation, persistence, and escalation."""
+    """Single-session controller. The service serializes concurrent turns."""
 
-    def __init__(self, survey: SurveyDefinition, extractor: Extractor = keyword_extractor) -> None:
+    def __init__(self, survey: SurveyDefinition, extractor: Extractor = keyword_extractor):
+        ids = [q.id for q in survey.questions]
+        if len(set(ids)) != len(ids) or any(not q.id or not q.prompt or not q.options for q in survey.questions):
+            raise ValueError("Questions require unique IDs, prompts and nonempty options.")
         self.session = SurveySession(survey=survey)
         self.extractor = extractor
 
     def start(self) -> str:
+        if self.session.state != SurveyState.ASKING:
+            raise RuntimeError("A session can only be started once.")
         question = self.session.current_question
-        if question is None:
-            self.session.state = SurveyState.COMPLETE
-            return "Survey complete."
-        self.session.state = SurveyState.LISTENING
-        return question.prompt
+        self.session.state = SurveyState.LISTENING if question else SurveyState.COMPLETE
+        return question.prompt if question else "Survey complete."
 
-    def receive_transcript(self, transcript: str) -> str:
-        if self.session.state in (SurveyState.COMPLETE, SurveyState.ESCALATED):
-            raise RuntimeError(f"Cannot receive input in {self.session.state.value} state.")
-        flag = detect_safety_flag(transcript)
+    def _clear_pending(self):
+        self.session.pending_extraction = None
+        self.session.pending_transcript = None
+
+    def _guard(self, text: str) -> str | None:
+        flag = detect_safety_flag(text)
         if flag:
+            self._clear_pending()
             self.session.safety_flags.append(flag)
             self.session.state = SurveyState.ESCALATED
-            return "Thank you for telling me. I’m going to flag this for your care team rather than interpret it as a survey response."
-        question = self.session.current_question
-        if question is None:
-            self.session.state = SurveyState.COMPLETE
-            return "Survey complete."
-        self.session.state = SurveyState.INTERPRETING
-        extraction = self.extractor(transcript, question)
-        self.session.pending_extraction = extraction
-        if extraction.question_id != question.id or extraction.value not in question.options:
-            self.session.state = SurveyState.CLARIFYING
-            return f"Please answer using one of: {', '.join(question.options)}."
-        if extraction.needs_clarification or extraction.confidence < 0.70:
-            self.session.state = SurveyState.CLARIFYING
-            return f"Could you say whether you would describe it as {', '.join(question.options)}?"
-        self.session.state = SurveyState.CONFIRMING
-        return f"It sounds like you would describe it as {extraction.value}. Is that right? Please say yes or no."
+            return "The survey is paused for review. This demo does not notify a care team."
+        normalized = text.strip().casefold().rstrip(".!?")
+        if normalized in {"stop", "stop the survey", "opt out", "quit", "i want to stop"}:
+            self._clear_pending()
+            self.session.state = SurveyState.STOPPED
+            return "The survey has stopped."
+        return None
 
-    def confirm(self, answer: str, raw_transcript: str) -> str:
+    def handle_turn(self, transcript: str) -> str:
+        if not isinstance(transcript, str):
+            raise TypeError("Transcript must be text.")
+        if self.session.state in TERMINAL:
+            raise RuntimeError("This session has ended.")
+        if self.session.state == SurveyState.CONFIRMING:
+            return self.confirm(transcript)
+        return self.receive_transcript(transcript)
+
+    def receive_transcript(self, transcript: str) -> str:
+        if self.session.state not in {SurveyState.LISTENING, SurveyState.CLARIFYING}:
+            raise RuntimeError("Start the survey and resolve any pending confirmation first.")
+        guarded = self._guard(transcript)
+        if guarded:
+            return guarded
+        if not transcript.strip() or len(transcript) > 8000:
+            return "Please provide a short answer to the current question."
+        question = self.session.current_question
+        assert question is not None
+        self._clear_pending()
+        self.session.state = SurveyState.INTERPRETING
+        try:
+            result = self.extractor(transcript, question)
+        except ExtractionError:
+            self.session.state = SurveyState.CLARIFYING
+            return "I couldn't interpret that just now. Please repeat your answer."
+        except Exception:
+            self.session.state = SurveyState.CLARIFYING
+            raise
+        valid = (
+            isinstance(result, Extraction)
+            and result.question_id == question.id
+            and result.value in question.options
+            and result.needs_clarification is False
+            and isinstance(result.evidence, str)
+            and bool(result.evidence.strip())
+            and result.evidence in transcript
+            and (result.confidence is None or (
+                type(result.confidence) in (float, int)
+                and math.isfinite(result.confidence)
+                and 0.7 <= result.confidence <= 1
+            ))
+        )
+        if not valid:
+            self.session.state = SurveyState.CLARIFYING
+            return f"{question.prompt} Please choose: {', '.join(question.options)}."
+        self.session.pending_extraction = result
+        self.session.pending_transcript = transcript
+        self.session.state = SurveyState.CONFIRMING
+        return f"For the question '{question.prompt}', I understood '{result.value}'. Is that correct? Please say yes or no."
+
+    def confirm(self, answer: str, raw_transcript: str | None = None) -> str:
+        # Second argument retained for old callers; source provenance is internal.
         if self.session.state != SurveyState.CONFIRMING:
-            raise RuntimeError("Confirmation is only valid after a candidate extraction.")
-        normalized = answer.strip().casefold()
+            raise RuntimeError("No candidate is awaiting confirmation.")
+        guarded = self._guard(answer)
+        if guarded:
+            return guarded
+        if raw_transcript is not None:
+            guarded = self._guard(raw_transcript)
+            if guarded:
+                return guarded
+        normalized = re.sub(r"[.!?,]+$", "", answer.strip().casefold()).strip()
+        if raw_transcript is not None and raw_transcript != answer:
+            return "Please confirm with an unmodified yes or no transcript."
         if normalized in {"yes", "yeah", "yep", "correct", "that's right"}:
-            extraction = self.session.pending_extraction
-            assert extraction is not None
+            result = self.session.pending_extraction
             question = self.session.current_question
-            assert question is not None
+            assert result is not None and question is not None
             self.session.state = SurveyState.SAVING
             self.session.responses[question.id] = ConfirmedResponse(
-                question.id, extraction.value or "", raw_transcript, extraction.evidence, extraction.confidence
+                question.id, result.value, self.session.pending_transcript,
+                result.evidence, result.confidence, answer,
             )
-            self.session.pending_extraction = None
+            self._clear_pending()
             self.session.question_index += 1
-            if self.session.current_question is None:
-                self.session.state = SurveyState.COMPLETE
-                return "Thank you. The survey is complete."
-            self.session.state = SurveyState.LISTENING
-            return self.session.current_question.prompt
+            question = self.session.current_question
+            self.session.state = SurveyState.LISTENING if question else SurveyState.COMPLETE
+            return question.prompt if question else "Thank you. The survey is complete."
         if normalized in {"no", "nope", "incorrect", "not right"}:
-            self.session.pending_extraction = None
+            self._clear_pending()
             self.session.state = SurveyState.LISTENING
-            return "Thanks for correcting me. Please answer the question again."
-        return "Please say yes if that is correct, or no if I should try again."
+            return "Thanks for correcting me. " + self.session.current_question.prompt
+        return "Please say yes if that is correct, or no to change your answer."
 
     def snapshot(self) -> dict[str, object]:
         return {
             "state": self.session.state.value,
             "current_question": self.session.current_question.id if self.session.current_question else None,
-            "responses": {
-                key: {"value": value.value, "raw_response": value.raw_response, "evidence": value.evidence, "confirmed": True}
-                for key, value in self.session.responses.items()
-            },
-            "safety_flags": [{"reason": flag.reason, "evidence": flag.evidence} for flag in self.session.safety_flags],
+            "responses": {key: {**asdict(value), "confirmed": True} for key, value in self.session.responses.items()},
+            "safety_flags": [asdict(flag) for flag in self.session.safety_flags],
         }

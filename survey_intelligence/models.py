@@ -13,6 +13,7 @@ class SurveyState(str, Enum):
     SAVING = "saving"
     COMPLETE = "complete"
     ESCALATED = "escalated"
+    STOPPED = "stopped"
 
 
 @dataclass(frozen=True)
@@ -33,7 +34,7 @@ class SurveyDefinition:
 class Extraction:
     question_id: str
     value: str | None
-    confidence: float
+    confidence: float | None
     evidence: str
     needs_clarification: bool = False
 
@@ -50,7 +51,8 @@ class ConfirmedResponse:
     value: str
     raw_response: str
     evidence: str
-    confidence: float
+    confidence: float | None
+    confirmation_transcript: str = ""
 
 
 @dataclass
@@ -59,6 +61,7 @@ class SurveySession:
     state: SurveyState = SurveyState.ASKING
     question_index: int = 0
     pending_extraction: Extraction | None = None
+    pending_transcript: str | None = None
     responses: dict[str, ConfirmedResponse] = field(default_factory=dict)
     safety_flags: list[SafetyFlag] = field(default_factory=list)
 
