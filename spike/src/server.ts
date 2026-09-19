@@ -1,121 +1,81 @@
 import express from "express";
 import { WebSocketServer, type WebSocket } from "ws";
 import { createServer } from "node:http";
-import twilio from "twilio";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
 import { env } from "./env.js";
-import { SPIKE_QUESTION } from "./question.js";
+import { DOCTOR_INTRO_TEXT, SPIKE_QUESTION } from "./question.js";
 import { mapAnswer } from "./claudeMapper.js";
-import { synthesizeMulaw } from "./deepgramTts.js";
-import { sendMulawToTwilio } from "./twilioAudio.js";
+import { synthesizeLinear16, TTS_SAMPLE_RATE } from "./deepgramTts.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
-app.use(express.urlencoded({ extended: false }));
-app.use(express.json());
+app.use(express.static(path.join(__dirname, "..", "public")));
 
-const twilioClient = twilio(env.TWILIO_ACCOUNT_SID, env.TWILIO_AUTH_TOKEN);
 const deepgram = createClient(env.DEEPGRAM_API_KEY);
 
-// --- Trigger the spike call -------------------------------------------------
-
-app.post("/call", async (_req, res) => {
-  try {
-    const call = await twilioClient.calls.create({
-      to: env.TEST_DESTINATION_NUMBER,
-      from: env.TWILIO_FROM_NUMBER,
-      url: `${env.PUBLIC_BASE_URL}/twiml`,
-    });
-    console.log(`[call] started ${call.sid} -> ${env.TEST_DESTINATION_NUMBER}`);
-    res.json({ callSid: call.sid });
-  } catch (err) {
-    console.error("[call] failed to start", err);
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-app.post("/twiml", (_req, res) => {
-  const wsUrl = env.PUBLIC_BASE_URL.replace(/^http/, "ws") + "/media";
-  res.type("text/xml").send(
-    `<?xml version="1.0" encoding="UTF-8"?>` +
-      `<Response><Connect><Stream url="${wsUrl}" /></Connect></Response>`,
-  );
-});
-
-// --- Media stream: the actual spike call flow -------------------------------
+// --- Browser mic <-> Deepgram <-> Claude bridge: the spike's call flow --------------
 
 type CallState =
   | "AWAITING_START"
-  | "PLAYING_INTRO"
+  | "DOCTOR_INTRO"
+  | "PLAYING_QUESTION"
   | "LISTENING"
   | "MAPPING"
   | "PLAYING_CONFIRMATION"
   | "DONE";
 
+// Waits this long after the patient stops talking before assuming they're done --
+// deliberately generous (see docs/architecture.md's turn-taking tuning) since
+// orthopedic and stroke patients alike may need more time than a snappy default gives.
+const ENDPOINTING_MS = 3500;
+const UTTERANCE_END_MS = 4000;
+const SILENCE_BACKSTOP_MS = 4500;
+
 const httpServer = createServer(app);
 const wss = new WebSocketServer({ server: httpServer, path: "/media" });
 
+function sendJson(ws: WebSocket, payload: unknown) {
+  ws.send(JSON.stringify(payload));
+}
+
+// Sends a spoken line to the browser: a JSON preamble naming the line (so the client
+// can report back when it's done playing) followed by the raw PCM16 audio itself.
+async function speak(ws: WebSocket, text: string, markName: string) {
+  const audio = await synthesizeLinear16(text);
+  sendJson(ws, { type: "audio_start", markName, sampleRate: TTS_SAMPLE_RATE });
+  ws.send(audio);
+}
+
 wss.on("connection", (ws: WebSocket) => {
-  console.log("[media] Twilio connected");
+  console.log("[media] browser connected");
 
   let state: CallState = "AWAITING_START";
-  let streamSid = "";
+  let micSampleRate = 16000;
   let finalTranscript = "";
   let silenceTimer: NodeJS.Timeout | null = null;
+  let dgLive: ReturnType<typeof deepgram.listen.live> | null = null;
 
-  const dgLive = deepgram.listen.live({
-    model: "nova-2",
-    encoding: "mulaw",
-    sample_rate: 8000,
-    channels: 1,
-    smart_format: true,
-    interim_results: true,
-    endpointing: 800, // ms of silence Deepgram treats as end-of-speech
-    utterance_end_ms: 1500, // extra backstop for rambling/elderly pauses
-  });
-
-  dgLive.on(LiveTranscriptionEvents.Open, () => {
-    console.log("[deepgram] STT socket open");
-  });
-
-  dgLive.on(LiveTranscriptionEvents.Transcript, (data) => {
-    const alt = data.channel?.alternatives?.[0];
-    if (!alt?.transcript) return;
-    if (data.is_final) {
-      finalTranscript = `${finalTranscript} ${alt.transcript}`.trim();
-      console.log(`[stt] final chunk: "${alt.transcript}"`);
-      resetSilenceBackstop();
-    } else {
-      console.log(`[stt] interim: "${alt.transcript}"`);
-    }
-  });
-
-  dgLive.on(LiveTranscriptionEvents.UtteranceEnd, () => {
-    console.log("[deepgram] UtteranceEnd");
-    if (state === "LISTENING") finishListening();
-  });
-
-  dgLive.on(LiveTranscriptionEvents.Error, (err) => {
-    console.error("[deepgram] STT error", err);
-  });
-
-  // Backstop in case Deepgram's own endpointing doesn't fire (belt + suspenders,
-  // per the plan's note that elderly/rambling speech needs a generous timeout).
   function resetSilenceBackstop() {
     if (silenceTimer) clearTimeout(silenceTimer);
     silenceTimer = setTimeout(() => {
       if (state === "LISTENING") finishListening();
-    }, 2500);
+    }, SILENCE_BACKSTOP_MS);
   }
 
   async function finishListening() {
     if (state !== "LISTENING") return;
     if (silenceTimer) clearTimeout(silenceTimer);
     state = "MAPPING";
+    sendJson(ws, { type: "state", state });
     console.log(`[flow] patient said: "${finalTranscript}"`);
 
     if (!finalTranscript.trim()) {
-      console.log("[flow] empty transcript, skipping mapping");
+      console.log("[flow] empty transcript, ending spike call");
       state = "DONE";
+      sendJson(ws, { type: "state", state });
       ws.close();
       return;
     }
@@ -123,66 +83,111 @@ wss.on("connection", (ws: WebSocket) => {
     try {
       const mapped = await mapAnswer(SPIKE_QUESTION, finalTranscript);
       console.log("[flow] Claude mapping:", mapped);
+      sendJson(ws, { type: "mapping", ...mapped });
 
       state = "PLAYING_CONFIRMATION";
-      const audio = await synthesizeMulaw(mapped.patient_facing_confirmation);
-      sendMulawToTwilio(ws, streamSid, audio, "confirmation-done");
+      sendJson(ws, { type: "state", state });
+      await speak(ws, mapped.patient_facing_confirmation, "confirmation-done");
     } catch (err) {
       console.error("[flow] mapping/confirmation failed", err);
+      sendJson(ws, { type: "error", text: String(err) });
       state = "DONE";
       ws.close();
     }
   }
 
-  ws.on("message", async (raw) => {
+  function openDeepgramStt() {
+    dgLive = deepgram.listen.live({
+      model: "nova-2",
+      encoding: "linear16",
+      sample_rate: micSampleRate,
+      channels: 1,
+      smart_format: true,
+      interim_results: true,
+      endpointing: ENDPOINTING_MS,
+      utterance_end_ms: UTTERANCE_END_MS,
+    });
+
+    dgLive.on(LiveTranscriptionEvents.Open, () => {
+      console.log("[deepgram] STT socket open");
+    });
+
+    dgLive.on(LiveTranscriptionEvents.Transcript, (data) => {
+      const alt = data.channel?.alternatives?.[0];
+      if (!alt?.transcript) return;
+      if (data.is_final) {
+        finalTranscript = `${finalTranscript} ${alt.transcript}`.trim();
+        console.log(`[stt] final chunk: "${alt.transcript}"`);
+        sendJson(ws, { type: "transcript", text: finalTranscript });
+        resetSilenceBackstop();
+      } else {
+        console.log(`[stt] interim: "${alt.transcript}"`);
+      }
+    });
+
+    dgLive.on(LiveTranscriptionEvents.UtteranceEnd, () => {
+      console.log("[deepgram] UtteranceEnd");
+      if (state === "LISTENING") finishListening();
+    });
+
+    dgLive.on(LiveTranscriptionEvents.Error, (err) => {
+      console.error("[deepgram] STT error", err);
+      sendJson(ws, { type: "error", text: String(err) });
+    });
+  }
+
+  ws.on("message", async (raw, isBinary) => {
+    if (isBinary) {
+      if (state === "LISTENING" && dgLive) {
+        const buf = raw as Buffer;
+        dgLive.send(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+      }
+      return; // strict turn-taking, no barge-in in the spike
+    }
+
     const msg = JSON.parse(raw.toString());
 
-    switch (msg.event) {
+    switch (msg.type) {
       case "start": {
-        streamSid = msg.start.streamSid;
-        console.log(`[media] stream started ${streamSid}`);
-        state = "PLAYING_INTRO";
-        const audio = await synthesizeMulaw(SPIKE_QUESTION.promptText);
-        sendMulawToTwilio(ws, streamSid, audio, "question-done");
+        micSampleRate = msg.sampleRate;
+        console.log(`[media] call started, mic sample rate ${micSampleRate}Hz`);
+        openDeepgramStt();
+
+        state = "DOCTOR_INTRO";
+        sendJson(ws, { type: "state", state });
+        await speak(ws, DOCTOR_INTRO_TEXT, "intro-done");
         break;
       }
 
-      case "media": {
-        if (state !== "LISTENING") return; // strict turn-taking, no barge-in in the spike
-        const audioBuf = Buffer.from(msg.media.payload, "base64");
-        dgLive.send(audioBuf.buffer.slice(audioBuf.byteOffset, audioBuf.byteOffset + audioBuf.byteLength));
-        break;
-      }
-
-      case "mark": {
-        if (msg.mark.name === "question-done") {
-          console.log("[flow] intro/question finished playing, now listening");
+      case "playback_done": {
+        if (msg.markName === "intro-done") {
+          state = "PLAYING_QUESTION";
+          sendJson(ws, { type: "state", state });
+          await speak(ws, SPIKE_QUESTION.promptText, "question-done");
+        } else if (msg.markName === "question-done") {
+          console.log("[flow] question finished playing, now listening");
           state = "LISTENING";
+          sendJson(ws, { type: "state", state });
           resetSilenceBackstop();
-        } else if (msg.mark.name === "confirmation-done") {
+        } else if (msg.markName === "confirmation-done") {
           console.log("[flow] confirmation played, ending spike call");
           state = "DONE";
+          sendJson(ws, { type: "state", state });
           ws.close();
         }
-        break;
-      }
-
-      case "stop": {
-        console.log("[media] stream stopped");
-        dgLive.requestClose();
         break;
       }
     }
   });
 
   ws.on("close", () => {
-    console.log("[media] Twilio disconnected");
+    console.log("[media] browser disconnected");
     if (silenceTimer) clearTimeout(silenceTimer);
-    dgLive.requestClose();
+    dgLive?.requestClose();
   });
 });
 
 httpServer.listen(env.PORT, () => {
-  console.log(`Spike server listening on :${env.PORT}`);
-  console.log(`POST ${env.PUBLIC_BASE_URL}/call to place the spike call`);
+  console.log(`Spike server listening on http://localhost:${env.PORT}`);
+  console.log("Open that URL in a browser and click Start to place the spike call.");
 });

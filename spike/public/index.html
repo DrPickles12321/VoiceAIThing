@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>VoiceAIThing spike</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+    button { font-size: 16px; padding: 10px 20px; cursor: pointer; }
+    #status { font-weight: bold; margin: 16px 0; }
+    #log { background: #111; color: #0f0; font-family: monospace; font-size: 13px;
+           padding: 12px; height: 320px; overflow-y: auto; white-space: pre-wrap; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Phase 0 spike: browser voice check-in</h1>
+  <p>Click Start, allow microphone access, and answer the question naturally when asked
+     (rambling is fine -- that's the point). See <code>spike/README.md</code> for context.</p>
+  <button id="startBtn">Start call</button>
+  <div id="status">idle</div>
+  <div id="log"></div>
+  <script type="module" src="/client.js"></script>
+</body>
+</html>

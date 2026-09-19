@@ -25,10 +25,10 @@ The project pivoted from real Twilio phone calls to a **browser/desktop mic conv
 the hackathon demo, and split into two connected pieces: this repo (the voice call) and a
 separate, already-built gait-checker system that this repo only links out to.
 
-[`spike/`](./spike) is a Phase 0 feasibility spike, but **currently reflects the earlier Twilio
-phone-call design** — see [`spike/README.md`](./spike/README.md). It hasn't yet been updated
-for the browser-mic transport described in `docs/architecture.md`; its Claude tool-use mapping
-pattern (`spike/src/claudeMapper.ts`) still applies.
+[`spike/`](./spike) is a Phase 0 feasibility spike that now runs entirely in a browser tab
+(no phone, no Twilio, no ngrok) — mic capture, Deepgram STT/TTS, and Claude tool-use mapping,
+for a doctor intro plus one hardcoded question. See [`spike/README.md`](./spike/README.md) to
+run it.
 
 The full build (browser-based state machine, condition-based question branching, Supabase
 storage, review dashboard, gait-checker link handoff) follows the plan in

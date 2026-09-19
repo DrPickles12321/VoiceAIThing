@@ -17,14 +17,14 @@ delivers a link to it, it does not implement the gait checker itself.
 
 ## Repo layout
 
-- `spike/` — a throwaway Phase 0 feasibility spike. **It currently reflects the pre-pivot
-  Twilio phone-call design**, not the current browser-mic architecture in
-  `docs/architecture.md` — don't treat its transport code as current, though its Claude
-  tool-use mapping pattern (`spike/src/claudeMapper.ts`) still applies. This is intentionally
-  minimal; don't add production concerns (retries, multi-question loops, a database) to it.
-  Its modules seed the equivalents under `packages/server/src/` per `docs/architecture.md`'s
-  target repo structure once updated for the browser transport — do not just keep expanding
-  `spike/` in place.
+- `spike/` — a throwaway Phase 0 feasibility spike, now updated for the browser-mic
+  architecture in `docs/architecture.md`: a static page (`spike/public/`) captures mic audio
+  via an `AudioWorklet` and streams it to `spike/src/server.ts` over a WebSocket, which bridges
+  to Deepgram STT/TTS and Claude the same way the target `packages/server/` design will. It's
+  intentionally minimal (one hardcoded question, no persistence, no condition branching yet);
+  don't add production concerns (retries, multi-question loops, a database) to it. Its modules
+  seed the equivalents under `packages/server/src/` per `docs/architecture.md`'s target repo
+  structure — do not just keep expanding `spike/` in place.
 - `docs/architecture.md` — system design: call transport, state machine, data model, repo
   structure, risks/fallbacks. Keep it in sync with real implementation decisions as the build
   progresses; don't let it drift into aspirational fiction.

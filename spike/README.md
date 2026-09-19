@@ -1,55 +1,66 @@
-# Phase 0 Feasibility Spike
+# Phase 0 Feasibility Spike (browser mic)
 
-Throwaway code proving the riskiest part of the idea end-to-end on a **real phone call**:
-Twilio call → Deepgram STT (live) → Claude forced tool-use mapping → Deepgram TTS confirmation,
-for a single hardcoded orthopedic PROM question. No database, no dashboard, no multi-question
-loop — just: does this round-trip work, and does it feel good?
+Throwaway code proving the riskiest part of the current design end-to-end, entirely in a
+**browser tab on your own machine**: mic capture → Deepgram STT (live) → Claude forced tool-use
+mapping → Deepgram TTS confirmation, for a doctor introduction plus one hardcoded orthopedic
+PROM question. No database, no dashboard, no multi-question loop, no phone call — just: does
+this round-trip work, and does it feel like a real conversation?
 
-This must be run somewhere with real outbound network access to `api.twilio.com` and
-`api.deepgram.com`, and a public HTTPS/WSS URL Twilio can reach (a sandboxed CI/cloud dev
-environment may block both). Locally with ngrok is the easy path.
+This previously used a real Twilio phone call; the project pivoted to a browser-mic demo (see
+`docs/architecture.md`), which removes the need for a Twilio account, ngrok, or a public URL
+entirely. Everything here runs on `localhost`.
 
 ## Setup
 
 1. `cp .env.example .env` and fill in:
-   - `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` — from the Twilio console.
-   - `TWILIO_FROM_NUMBER` — a Twilio number you own.
-   - `TEST_DESTINATION_NUMBER` — the phone you'll answer. **On a Twilio trial account this
-     number must be verified in the console first**, or the call will be rejected.
    - `DEEPGRAM_API_KEY` — from console.deepgram.com.
    - `ANTHROPIC_API_KEY` — your Claude API key.
-   - `PUBLIC_BASE_URL` — filled in after you start ngrok (step 3).
 
 2. `npm install`
 
-3. In one terminal: `npm run dev` (starts the server on `PORT`, default 3000).
-   In another: `ngrok http 3000`, then copy the `https://...ngrok-free.app` URL into
-   `PUBLIC_BASE_URL` in `.env` and restart the dev server so it picks up the new value.
+3. `npm run dev` (starts the server on `PORT`, default 3000).
 
-4. Trigger the call:
-   ```bash
-   curl -X POST "$PUBLIC_BASE_URL/call"
-   ```
+4. Open `http://localhost:3000` in a browser that has mic access (Chrome/Edge/Firefox all
+   work; Safari's AudioWorklet support can be flakier). Click **Start call**, allow microphone
+   access when prompted.
 
-5. Answer the phone. You should hear the question spoken, then have a chance to answer —
-   try rambling the way an elderly patient might ("oh you know, some days it's fine, other
-   days going up the stairs after gardening it really acts up..."). Watch the server logs:
-   interim/final STT transcripts, Claude's `map_answer` tool call result, and finally the
-   spoken confirmation before the call ends.
+5. You'll hear a doctor-introduction line, then the question. Answer naturally — try
+   rambling the way a real patient might ("oh you know, some days it's fine, other days going
+   up the stairs after gardening it really acts up...") and **deliberately pause mid-sentence**
+   to check that the system waits for you instead of cutting you off (it's tuned to wait
+   roughly 3–4 seconds of silence before assuming you're done). Watch the on-page log and the
+   server's terminal output: live transcript, Claude's `map_answer` tool call result, and
+   finally the spoken confirmation before the call ends.
 
 ## What to judge
 
-- **Format plumbing**: did audio flow cleanly both ways with no transcoding glitches
-  (garbled/silent audio would indicate a mulaw/8kHz mismatch)?
-- **Mapping quality**: did Claude pick a sensible scale value from a rambling answer, and
-  did the confirmation sentence sound natural rather than robotic?
-- **Latency**: was the pause between finishing speaking and hearing the confirmation
-  tolerable on a live line?
-- **Endpointing**: did the system wait long enough for pauses without cutting the patient
-  off, but not so long that it felt unresponsive?
+- **Conversational feel**: does the doctor intro + question + confirmation sequence feel like
+  an actual conversation, not a rigid menu?
+- **Turn-taking**: does the ~3–4 second pause tolerance feel right — long enough not to cut
+  patients off mid-thought, but not so long the call feels unresponsive?
+- **Audio quality**: did mic capture and TTS playback both come through cleanly (garbled or
+  silent audio would point to a sample-rate mismatch between the browser and Deepgram)?
+- **Mapping quality**: did Claude pick a sensible scale value from a rambling answer, and did
+  the confirmation sentence sound natural rather than robotic?
+- **Latency**: was the pause between finishing speaking and hearing the confirmation tolerable?
 
-If this feels compelling, this code seeds `packages/server/src/{ws/mediaStream.ts,
-integrations/deepgramStt.ts, integrations/deepgramTts.ts, integrations/claudeMapper.ts}`
-in the full build (see `/docs` at the repo root for the full plan). If the streaming
-pipeline is too flaky to demo reliably, fall back to a turn-based version instead of
-sinking more time into full-duplex streaming.
+## How it works (for orientation)
+
+- `public/index.html` + `public/client.js` + `public/pcm-worklet.js` — the browser side: mic
+  capture via `getUserMedia` + an `AudioWorklet` that converts Float32 samples to Int16 PCM and
+  posts them to the main thread, which streams them over a WebSocket; TTS audio comes back the
+  same way and is scheduled for gapless playback via `AudioContext`.
+- `src/server.ts` — the state machine: `DOCTOR_INTRO → PLAYING_QUESTION → LISTENING → MAPPING
+  → PLAYING_CONFIRMATION → DONE`. Turn-taking is coordinated by the client reporting back
+  `{type: "playback_done", markName}` once it's finished playing a given line, mirroring what
+  Twilio's `mark` events did for the old telephony version.
+- `src/integrations` equivalents: `src/deepgramTts.ts` (linear16 PCM synthesis) and
+  `src/claudeMapper.ts` (forced `map_answer` tool-use — unchanged from before, see
+  `CLAUDE.md`'s non-negotiable "never free-chat" constraint).
+
+If this feels compelling, this code seeds `packages/server/src/{ws/browserStream.ts,
+integrations/deepgramStt.ts, integrations/deepgramTts.ts, integrations/claudeMapper.ts,
+call-flow/stateMachine.ts, call-flow/conditionLookup.ts}` in the full build (see
+`docs/architecture.md`). If the streaming pipeline is too flaky to demo reliably, fall back to
+a turn-based version (buffer a full utterance, then run STT → Claude → TTS as discrete steps)
+instead of sinking more time into full-duplex streaming.

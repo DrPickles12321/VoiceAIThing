@@ -1,5 +1,7 @@
-// Single hardcoded PROM question for the Phase 0 spike.
-// The full build seeds a whole bank of these from survey/koos-hoos-subset.json instead.
+// Single hardcoded PROM question for the Phase 0 spike, plus a doctor-introduction
+// opener (see docs/architecture.md's DOCTOR_INTRO state). The full build looks up the
+// patient's condition_category and asks a full 6-question set from
+// survey/koos-hoos-subset.json or survey/stroke-subset.json instead.
 
 export interface AnswerOption {
   code: number;
@@ -12,8 +14,12 @@ export interface PromQuestion {
   answerOptions: AnswerOption[];
 }
 
+export const DOCTOR_INTRO_TEXT =
+  "Hi, this is Dr. Rivera's office calling to check in on how your knee has been doing. " +
+  "I'm going to ask you a quick question about it -- take your time answering, there's no rush at all.";
+
 export const SPIKE_QUESTION: PromQuestion = {
-  code: "KOOS_PAIN_1",
+  code: "PAIN_1",
   promptText:
     "Over the past week, how would you describe your knee pain during activities like walking or climbing stairs?",
   answerOptions: [
