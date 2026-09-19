@@ -1,0 +1,156 @@
+from __future__ import annotations
+
+import asyncio
+import base64
+import json
+
+import pytest
+
+from app.patient_repository import InMemoryPatientRepository
+from app.survey_engine import SafeSurveyEngine
+from app.telephony import twilio
+from app.telephony.call_session import PhoneCallSession
+from app.telephony.config import TelephonyConfigurationError, load_settings
+from app.telephony.deepgram_stt import listen_url, parse_message
+from app.telephony.deepgram_tts import MULAW_FRAME_BYTES, frames, speak_url
+
+ENV = {
+    "DEEPGRAM_API_KEY": "dg-key",
+    "TWILIO_ACCOUNT_SID": "AC123",
+    "TWILIO_AUTH_TOKEN": "token",
+    "TWILIO_FROM_NUMBER": "+15005550006",
+    "PUBLIC_BASE_URL": "https://tunnel.example.com/",
+}
+
+
+def build_session(patient_code: str = "RGN-0417"):
+    spoken: list[str] = []
+
+    async def speak(text: str) -> None:
+        spoken.append(text)
+
+    engine = SafeSurveyEngine(InMemoryPatientRepository(), patient_code)
+    return PhoneCallSession(engine, speak, session_id="sess-1"), spoken
+
+
+def test_settings_build_public_urls():
+    settings = load_settings(ENV)
+    assert settings.ready
+    assert settings.webhook_url("/twilio/voice") == "https://tunnel.example.com/twilio/voice"
+    assert settings.websocket_url("/twilio/media") == "wss://tunnel.example.com/twilio/media"
+
+
+def test_settings_require_outbound_lists_missing_values():
+    settings = load_settings({"DEEPGRAM_API_KEY": "dg-key"})
+    with pytest.raises(TelephonyConfigurationError) as excinfo:
+        settings.require_outbound()
+    assert "TWILIO_ACCOUNT_SID" in str(excinfo.value)
+    assert "PUBLIC_BASE_URL" in str(excinfo.value)
+
+
+def test_media_stream_twiml_passes_custom_parameters():
+    xml = twilio.media_stream_twiml(
+        "wss://tunnel.example.com/twilio/media",
+        {"patientCode": "RGN-0417", "sessionId": "sess-1"},
+    )
+    assert '<Stream url="wss://tunnel.example.com/twilio/media">' in xml
+    assert '<Parameter name="patientCode" value="RGN-0417"/>' in xml
+    assert "<Connect>" in xml
+
+
+def test_require_e164_rejects_local_format():
+    with pytest.raises(ValueError):
+        twilio.require_e164("415-555-0123")
+    assert twilio.require_e164(" +1 415 555 0123 ") == "+14155550123"
+
+
+def test_validate_signature_matches_twilio_algorithm():
+    token = "12345"
+    url = "https://tunnel.example.com/twilio/voice"
+    params = {"CallSid": "CA1", "From": "+14155550123"}
+    payload = url + "CallSidCA1" + "From+14155550123"
+    import hashlib
+    import hmac
+
+    expected = base64.b64encode(
+        hmac.new(token.encode(), payload.encode(), hashlib.sha1).digest()
+    ).decode()
+    assert twilio.validate_signature(token, url, params, expected)
+    assert not twilio.validate_signature(token, url, params, "wrong")
+
+
+def test_listen_and_speak_urls_use_telephony_audio_format():
+    listen = listen_url("nova-3", 1200)
+    assert "encoding=mulaw" in listen and "sample_rate=8000" in listen
+    assert "utterance_end_ms=1200" in listen
+    speak = speak_url("aura-2-thalia-en")
+    assert "encoding=mulaw" in speak and "container=none" in speak
+
+
+def test_parse_message_normalizes_deepgram_events():
+    results = json.dumps(
+        {"type": "Results", "is_final": True, "channel": {"alternatives": [{"transcript": "mild"}]}}
+    )
+    event = parse_message(results)
+    assert event is not None and event.kind == "transcript"
+    assert event.text == "mild" and event.is_final
+
+    assert parse_message(json.dumps({"type": "UtteranceEnd"})).kind == "utterance_end"
+    assert parse_message(json.dumps({"type": "SpeechStarted"})).kind == "speech_started"
+    empty = json.dumps({"type": "Results", "channel": {"alternatives": [{"transcript": "  "}]}})
+    assert parse_message(empty) is None
+
+
+def test_frames_split_audio_into_twenty_millisecond_chunks():
+    chunks = frames(b"\xff" * (MULAW_FRAME_BYTES * 2 + 40))
+    assert [len(chunk) for chunk in chunks] == [MULAW_FRAME_BYTES, MULAW_FRAME_BYTES, 40]
+
+
+def test_call_session_runs_a_confirmed_answer():
+    session, spoken = build_session()
+    asyncio.run(session.begin())
+    assert "care team" in spoken[0]
+    assert "hip pain" in spoken[0]
+    assert "HOOS JR HIP SURVEY" not in spoken[0]
+
+    session.add_transcript("moderate")
+    assert asyncio.run(session.flush_utterance()) is False
+    assert "correct?" in spoken[-1]
+
+    session.add_transcript("yes")
+    asyncio.run(session.flush_utterance())
+    record = session.persistence.calls["sess-1"]
+    assert record.answers == [{"question_id": "hoos_stairs", "value": "moderate"}]
+
+
+def test_call_session_escalates_after_repeated_silence():
+    session, spoken = build_session()
+
+    async def scenario() -> bool:
+        await session.begin()
+        assert await session.handle_silence() is False
+        assert await session.handle_silence() is False
+        return await session.handle_silence()
+
+    assert asyncio.run(scenario()) is True
+    assert session.engine.session.needs_human_review
+    assert "clinician follow up" in spoken[-1]
+    assert session.persistence.calls["sess-1"].final_status == "escalated"
+
+
+def test_call_session_completes_and_prepares_handoff():
+    session, spoken = build_session()
+
+    async def scenario() -> None:
+        await session.begin()
+        for _ in range(len(session.engine.session.questions)):
+            session.add_transcript("none")
+            await session.flush_utterance()
+            session.add_transcript("yes")
+            await session.flush_utterance()
+
+    asyncio.run(scenario())
+    assert session.finished
+    assert session.handoff is not None
+    assert "gait tracker" in spoken[-1]
+    assert session.persistence.calls["sess-1"].final_status == "complete"

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VoiceAIThing phone survey</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Phone survey</h1>
+      <p id="config" class="status">Checking configuration...</p>
+      <form id="dialer">
+        <label>
+          Patient phone number
+          <input id="to" type="tel" placeholder="+14155550123" required />
+        </label>
+        <label>
+          Patient code
+          <select id="patient">
+            <option value="RGN-0417">RGN-0417 (orthopedic, HOOS JR)</option>
+            <option value="RGN-0500">RGN-0500 (stroke)</option>
+          </select>
+        </label>
+        <button type="submit">Call patient</button>
+      </form>
+      <p id="status" class="status"></p>
+      <h2>Live transcript</h2>
+      <ol id="transcript"></ol>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
