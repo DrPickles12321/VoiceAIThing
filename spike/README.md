@@ -7,9 +7,9 @@ introduction plus the **full 6-question loop**, branching between the real **HOO
 survey and a representative stroke set based on a real Supabase patient lookup — with
 confirmation classification and bounded clarification retries — and then, rather than hanging
 up, a live gait-checker handoff where the AI stays on the line, texts the patient their link,
-walks them through getting into position, and finally persists everything to Supabase. Still
-missing: a real dashboard/review UI and any call-triggering automation (one browser tab, one
-call, at a time).
+walks them through getting into position, and finally persists everything to Supabase — plus a
+basic review dashboard at `/dashboard.html` for looking at past calls. Still missing: any
+call-triggering automation (one browser tab, one call, at a time).
 
 This previously used a real Twilio phone call; the project pivoted to a browser-mic demo (see
 `docs/architecture.md`), which removes the need for a Twilio *voice* account, ngrok, or a
@@ -65,6 +65,12 @@ optionally used again, just for the gait-checker link text.)
    `<GAIT_CHECKER_BASE_URL>/api/submit-survey` and records a `gait_check_links` row. Watch the
    terminal for `[db]`, `[gait-checker]`, and `[sms]` log lines confirming each step.
 
+8. Open `http://localhost:3000/dashboard.html` (also linked from the start page) to review past
+   calls: a list of calls with patient/condition/status, and clicking one shows its structured
+   answers (mapped value, confidence, confirmed y/n, clarification attempts, and a "needs
+   review" flag) alongside the full transcript. A sample completed call is pre-seeded so the
+   dashboard isn't empty before your first real call.
+
 ## What to judge
 
 - **Conversational feel**: does the doctor intro → 6 questions → thank-you → walkthrough
@@ -103,6 +109,9 @@ optionally used again, just for the gait-checker link text.)
   patient's yes/no reply to the spoken confirmation).
 - `src/db/supabaseClient.ts` + `scripts/seed.ts` — the Supabase client and the one-time seed
   script for `survey_questions` and demo `patients`.
+- `src/dashboardApi.ts` + `public/dashboard.html` + `public/dashboard.js` — the review
+  dashboard: two read-only endpoints (`GET /api/calls`, `GET /api/calls/:id`) and a plain-JS
+  page rendering the call list and per-call detail.
 - `src/gaitCheckerClient.ts` — builds the deterministic patient link and POSTs the final
   survey submission (see `docs/architecture.md`'s integration contract for why those are two
   separate calls at two different points in the flow).

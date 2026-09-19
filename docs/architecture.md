@@ -6,10 +6,11 @@ below: the browser-mic transport, doctor intro, condition branching via a real S
 `patients` lookup, the full 6-question loop (both the HOOS JR and stroke sets) with confirmation
 classification and bounded clarification retries, the standard confirmation template, closing
 script, the full live gait-checker handoff (SMS link, walkthrough guidance/countdown, survey
-submission), and Supabase persistence (`calls`, `call_responses`, `gait_check_links`) — see
-`spike/README.md`. What's still missing: a real review dashboard and any automation for
-triggering calls (`packages/server/`/`packages/dashboard/` per the target repo structure below
-don't exist yet as separate packages).
+submission), Supabase persistence (`calls`, `call_responses`, `gait_check_links`), and a basic
+internal review dashboard (`spike/public/dashboard.html` + `spike/src/dashboardApi.ts`) — see
+`spike/README.md`. What's still missing: any automation for triggering calls (still one
+manual browser tab per call) — `packages/server/`/`packages/dashboard/` per the target repo
+structure below don't exist yet as separate packages, this all currently lives in `spike/`.
 
 ## Call transport (browser, not telephony)
 

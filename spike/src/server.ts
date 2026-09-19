@@ -22,11 +22,13 @@ import { sendLinkSms } from "./smsSender.js";
 import { lookupPatient, type PatientRecord } from "./conditionLookup.js";
 import { getQuestionSet } from "./questionSets.js";
 import { supabase } from "./db/supabaseClient.js";
+import { registerDashboardApi } from "./dashboardApi.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 app.use(express.static(path.join(__dirname, "..", "public")));
+registerDashboardApi(app);
 
 const deepgram = createClient(env.DEEPGRAM_API_KEY);
 

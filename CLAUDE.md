@@ -24,11 +24,12 @@ delivers a link to it, it does not implement the gait checker itself.
   HOOS JR (orthopedic) and representative stroke question sets via a real Supabase `patients`
   lookup; the full per-question loop includes confirmation classification and bounded
   clarification retries; and `PERSIST` writes `calls`/`call_responses`/`gait_check_links` rows
-  and submits to the gait checker. It is **no longer minimal** — this note replaces an earlier
-  version of itself that said the opposite. `packages/server/` (per `docs/architecture.md`'s
-  target repo structure) still doesn't exist as a separate package; this functionality
-  currently lives in `spike/`. What's still missing: a real dashboard/review UI and any
-  automation for triggering calls (still manual, one browser tab at a time).
+  and submits to the gait checker; `dashboardApi.ts` + `public/dashboard.html` serve a basic
+  internal review UI over the persisted calls. It is **no longer minimal** — this note replaces
+  an earlier version of itself that said the opposite. `packages/server/` and
+  `packages/dashboard/` (per `docs/architecture.md`'s target repo structure) still don't exist
+  as separate packages; this functionality currently lives in `spike/`. What's still missing:
+  any automation for triggering calls (still manual, one browser tab at a time).
 - `docs/architecture.md` — system design: call transport, state machine, data model, repo
   structure, risks/fallbacks. Keep it in sync with real implementation decisions as the build
   progresses; don't let it drift into aspirational fiction.

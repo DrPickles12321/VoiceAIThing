@@ -29,11 +29,12 @@ survey data to and links out to.
 [`spike/`](./spike) started as a Phase 0 feasibility spike but now implements nearly the full
 system: browser mic capture (no phone, no Twilio voice), the full 6-question loop branching
 between the real **HOOS, JR.** hip instrument and a representative stroke set via a real
-Supabase patient lookup, confirmation + bounded clarification retries, and the full live
-gait-checker handoff (SMS link, walkthrough guidance, Supabase persistence, survey submission).
-See [`spike/README.md`](./spike/README.md) to run it.
+Supabase patient lookup, confirmation + bounded clarification retries, the full live
+gait-checker handoff (SMS link, walkthrough guidance, Supabase persistence, survey submission),
+and a basic internal review dashboard for past calls. See [`spike/README.md`](./spike/README.md)
+to run it.
 
-Still missing: a real review dashboard and any call-triggering automation — see
+Still missing: any call-triggering automation — still one manual browser tab per call. See
 `docs/architecture.md` and `CLAUDE.md` for exactly what's built vs. not.
 
 ## License

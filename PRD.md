@@ -207,5 +207,5 @@ See `docs/architecture.md` for the technical plan and `spike/README.md` for the 
 (the spike now implements nearly everything above — the browser-mic conversation, doctor
 intro, condition branching via a real Supabase patient lookup, the full 6-question loop with
 confirmation and bounded clarification retries, the closing thank-you, the full guided
-gait-checker handoff, and Supabase persistence. Still missing: a real review dashboard and any
-call-triggering automation).
+gait-checker handoff, Supabase persistence, and a basic internal review dashboard. Still
+missing: any call-triggering automation — still one manual browser tab per call).
