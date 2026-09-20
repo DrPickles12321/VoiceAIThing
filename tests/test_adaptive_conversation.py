@@ -158,7 +158,7 @@ def test_unbounded_generated_speech_is_discarded(bridge):
     transcript = "I would choose mild"
     engine = make_engine(StubInterpreter(Interpretation("select", "mild", transcript, bridge)))
     prompt, answer = engine.handle_response(transcript)
-    assert prompt == f"Thank you. Question 2 of 6. {HOOS_JR_QUESTIONS[1].prompt}"
+    assert prompt == f"Got it, thanks. Question 2 of 6. {HOOS_JR_QUESTIONS[1].prompt}"
     assert answer.confirmed  # A bad optional bridge does not discard a valid answer.
 
 

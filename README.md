@@ -50,7 +50,8 @@ PATIENT_CODE=RGN-0417
 PATIENT_REPOSITORY=in_memory
 ```
 
-To interpret conversational answers in the desktop voice app, configure:
+To interpret conversational answers in the desktop voice app and the phone
+survey, configure:
 
 ```env
 SURVEY_EXTRACTOR=openai
@@ -204,6 +205,54 @@ node --test tests/test_voice_ui.cjs
 ```
 
 The repo is intentionally designed as a staged, reviewable stack rather than a giant one-shot rewrite.
+
+## Phone call survey (Twilio + Deepgram)
+
+`phone_app.py` runs the survey over a real phone call. Twilio dials the patient
+and streams the call audio to the server; Deepgram transcribes it live and
+speaks each prompt back into the call. Both API keys stay on the server.
+
+```bash
+cp .env.example .env
+# Set DEEPGRAM_API_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER
+ngrok http 8000                 # in a second terminal
+# Put the https tunnel URL in PUBLIC_BASE_URL, then:
+python phone_app.py
+```
+
+Open <http://127.0.0.1:8000>, enter the patient's number in E.164 format
+(`+14155550123`) and a patient code (`RGN-0417` orthopedic, `RGN-0500` stroke),
+then click **Call patient**. The page polls the live transcript while the call
+runs. Twilio must reach `PUBLIC_BASE_URL` over HTTPS, so keep the tunnel up for
+the whole call.
+
+How a call flows:
+
+| Step | Endpoint |
+| --- | --- |
+| Operator starts the call | `POST /api/calls` places the Twilio call |
+| Twilio asks what to do | `POST /twilio/voice` returns `<Connect><Stream>` TwiML |
+| Call audio both ways | `WS /twilio/media` mu-law 8 kHz frames |
+| Call lifecycle | `POST /twilio/status` |
+
+The websocket bridge feeds inbound audio to Deepgram, waits for `UtteranceEnd`
+before answering, interrupts its own playback when the patient starts talking,
+re-prompts on silence, and escalates for human review after repeated confusion
+or silence. Webhook requests are rejected unless the `X-Twilio-Signature`
+header validates against `TWILIO_AUTH_TOKEN`.
+
+`python scripts/check_deepgram.py` verifies the Deepgram speech round trip in
+the telephony audio format without placing a call.
+
+Tuning what the patient hears and how well they are understood:
+
+- `DEEPGRAM_STT_MODEL`: `nova-3` (default) or `nova-2-phonecall`, which is
+  trained on 8 kHz call audio. Either way the survey answer words (none, mild,
+  moderate, …) are boosted, via `keyterm` on Nova-3 and `keywords` elsewhere.
+- `DEEPGRAM_TTS_MODEL`: any Aura-2 voice. `python scripts/audition_voices.py`
+  renders the call opening in a handful of warm voices to `voice_samples/` so you
+  can pick one by ear before changing it.
+- `UTTERANCE_END_MS`: how long a silence ends the patient's turn (default 1200).
 
 ## Desktop voice demo with Deepgram
 

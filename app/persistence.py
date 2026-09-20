@@ -33,6 +33,9 @@ class CallRecord:
     status: str = "in_progress"
     answers: list[dict[str, object]] = field(default_factory=list)
     final_status: str | None = None
+    call_sid: str | None = None
+    to_number: str | None = None
+    carrier_status: str | None = None
     patient_record_id: str | None = None
     turns: list[TranscriptTurn] = field(default_factory=list)
 
@@ -57,6 +60,9 @@ class InMemoryPersistence:
         self.calls: dict[str, CallRecord] = {}
 
     def start_call(self, session_id: str, patient_code: str, condition_category: str) -> CallRecord:
+        existing = self.calls.get(session_id)
+        if existing is not None:
+            return existing
         record = CallRecord(
             session_id=session_id,
             patient_code=patient_code,

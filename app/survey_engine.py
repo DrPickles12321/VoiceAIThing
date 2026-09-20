@@ -29,6 +29,21 @@ class SafeSurveyEngine:
             questions=load_question_bank(self.patient.condition_category),
         )
 
+    def _clarification(self, question, acknowledgment=None) -> str:
+        """Re-ask a question, listing the scale only when the caller needs it.
+
+        The scale is read out with the first question, so repeating it on every
+        stumble makes a phone call tedious; a second miss on the same question
+        means the caller probably does need to hear it again.
+        """
+
+        return speech.clarification_text(
+            question,
+            acknowledgment,
+            include_options=self.session.clarification_attempts >= 1,
+            attempt=self.session.clarification_attempts,
+        )
+
     def _question_text(self) -> str:
         return speech.question_text(
             self.session.current_question, self.session.current_index, len(self.session.questions),
@@ -45,7 +60,7 @@ class SafeSurveyEngine:
             self.session.state = "complete"
             return speech.COMPLETE
         self.session.state = "asking"
-        return f"{speech.INTRO} {self._question_text()} {speech.options_text(self.session.current_question)}"
+        return speech.opening_text(self.session.current_question, len(self.session.questions))
 
     def _retry(self, prompt: str) -> tuple[str, None]:
         self.session.clarification_attempts += 1
@@ -89,7 +104,9 @@ class SafeSurveyEngine:
         if self.session.is_complete:
             self.session.state = "complete"
             return speech.COMPLETE, answer
-        bridge = speech.validated_bridge(acknowledgment) or "Thank you."
+        bridge = speech.validated_bridge(acknowledgment) or speech.accepted_bridge(
+            answer.normalized_value, self.session.current_index
+        )
         return f"{bridge} {self._question_text()}", answer
 
     def handle_response(self, transcript: str) -> tuple[str, SurveyAnswer | None]:
@@ -110,7 +127,7 @@ class SafeSurveyEngine:
             if normalized in NO:
                 self._clear_pending()
                 self.session.state = "asking"
-                return self._retry(f"Thank you for correcting me. {speech.clarification_text(question)}")
+                return self._retry(f"Thanks for correcting me. {self._clarification(question)}")
 
         result = Interpretation(command) if command else self._interpret(transcript)
         if result.intent == "stop":
@@ -137,7 +154,7 @@ class SafeSurveyEngine:
         if result.intent == "reject":
             self._clear_pending()
             self.session.state = "asking"
-            return self._retry(f"Thank you for correcting me. {speech.clarification_text(question)}")
+            return self._retry(f"Thanks for correcting me. {self._clarification(question)}")
 
         if result.intent == "select":
             # Naming an option is already the patient's decision, including a
@@ -164,7 +181,7 @@ class SafeSurveyEngine:
             else:
                 self.session.state = "clarifying"
                 prefix = "Thank you for sharing. Let’s come back to this question. " if result.intent == "off_topic" else ""
-                prompt = prefix + speech.clarification_text(question, result.acknowledgment)
+                prompt = prefix + self._clarification(question, result.acknowledgment)
             return self._retry(prompt)
 
         correction = self.session.pending_answer is not None

@@ -23,7 +23,7 @@ def test_question_bank_selection_is_condition_specific():
 def test_survey_engine_runs_a_safe_question_loop():
     engine = SafeSurveyEngine(InMemoryPatientRepository(), "RGN-0417")
     first_prompt = engine.start()
-    assert "automated survey helper" in first_prompt
+    assert "automated check-in from your doctor" in first_prompt
     assert HOOS_JR_QUESTIONS[0].prompt in first_prompt
     assert "hip pain" in first_prompt.lower()
 

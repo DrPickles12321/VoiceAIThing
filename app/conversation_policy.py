@@ -149,13 +149,63 @@ Exact classification examples (acknowledgment may be null in every case):
   This is a tentative mapping of strongly intensified pain, not a diagnosis.
 """
 
+# A blank line marks a beat the phone survey plays as a short silence.
+PARAGRAPH = "\n\n"
 INTRO = (
-    "Hello, I’m your automated survey helper. Take your time and answer in your own words. "
-    "After each question, just speak. I’ll respond after a brief pause. "
-    "If I interpret your answer, I’ll check with you. "
-    "You can ask me to repeat, pause, or stop."
+    "Hi, this is the automated check-in from your doctor’s office. "
+    "I’m calling to see how you’re doing after your surgery. "
+    "This is for your own recovery, so there are no wrong answers, and it only takes a couple of minutes. "
+    "Just answer each question in your own words, and I’ll respond after a short pause. "
+    "You can ask me to repeat, pause, or stop at any time."
+)
+# Said after an answer is locked in, picked by how the patient is doing so the
+# reply is not the same flat "Thank you." six times in a row.
+ACCEPTED_BRIDGES = {
+    "none": ("That’s good to hear.", "Glad to hear that."),
+    "mild": ("Okay, good to know.", "Got it, thanks."),
+    "moderate": ("Okay, I’ve noted that.", "Understood, thank you."),
+    "severe": ("I’m sorry to hear that. I’ve noted it.", "That sounds hard. I’ve got it down."),
+    "extreme": ("I’m really sorry you’re dealing with that. I’ve noted it.", "That sounds very hard. I’ve got it down."),
+}
+DEFAULT_ACCEPTED_BRIDGES = ("Thank you.", "Got it.")
+CLARIFY_BRIDGES = (
+    "Sorry, I didn’t quite catch that.",
+    "Let me try that once more.",
+    "One more time, and take your time.",
+)
+CLARIFY_CLOSERS = (
+    "Which is closest for you?",
+    "Just pick whichever one is closest.",
+    "Whichever fits best is fine.",
 )
 COMPLETE = "Thank you for sharing your answers with me. The survey is complete."
+GAIT_INTRO = (
+    "Thank you for those answers. There is one more thing your care team would like, "
+    "and then we are done."
+    f"{PARAGRAPH}"
+    "They would like a short video of you walking. It shows them how steady you are on "
+    "your feet as you heal, which is hard to tell from answers alone, and it takes about "
+    "a minute. I am texting you a secure link to the camera page now."
+)
+LINK_SENT = (
+    "You should have the text in a moment. Open the link on your phone, and tell me when "
+    "you have it up."
+)
+LINK_REMINDER = "No rush at all. Just say ‘ready’ once you have the link open."
+WALKTHROUGH_GUIDANCE = (
+    "Great. Tap the “Live Camera” mode, then prop your phone against something steady "
+    "where your whole body is in view, and step back a few paces."
+)
+WALKTHROUGH_COUNTDOWN = (
+    "When I reach three, walk back and forth in front of the camera at your normal pace "
+    "for about fifteen seconds."
+    f"{PARAGRAPH}"
+    "One. Two. Three. Go ahead."
+)
+WALKTHROUGH_CLOSING = (
+    "That is everything. Thank you, this really does help your care team follow your "
+    "recovery. Take care of yourself, and goodbye."
+)
 STOPPED = "Of course. We’ll stop here. Thank you for your time."
 PAUSED = "Of course. Take your time. Say ‘resume’ when you’re ready, or ‘stop’ to finish."
 REVIEW = (
@@ -168,8 +218,33 @@ MEDICAL_BOUNDARY = (
 )
 
 
+def sms_body(link: str) -> str:
+    """The text the patient gets, with the gait-checker link in it."""
+
+    return (
+        "Your care team's walking check-in: "
+        f"{link} "
+        "Open this on your phone and follow along with the call."
+    )
+
+
+def accepted_bridge(value: str | None, index: int) -> str:
+    """A short human reaction to a locked-in answer, alternating across questions."""
+
+    choices = ACCEPTED_BRIDGES.get(value or "", DEFAULT_ACCEPTED_BRIDGES)
+    return choices[index % len(choices)]
+
+
 def question_text(question, index: int, total: int) -> str:
+    if index + 1 == total and total > 1:
+        return f"Last question. {question.prompt}"
     return f"Question {index + 1} of {total}. {question.prompt}"
+
+
+def opening_text(question, total: int) -> str:
+    """The greeting, a beat, then the first question with its scale."""
+
+    return f"{INTRO}{PARAGRAPH}{question_text(question, 0, total)} {options_text(question)}"
 
 
 def options_text(question) -> str:
@@ -182,7 +257,7 @@ def confirmation_text(question, value: str, acknowledgment=None, *, correction=F
         return f"{bridge} Would you say your {question.topic} is {value}?"
     bridge = validated_bridge(acknowledgment) or (
         "I’m sorry you’re dealing with that." if value in {"moderate", "severe", "extreme"}
-        else "Thank you for telling me."
+        else "Thanks for telling me."
     )
     return (
         f"{bridge} It sounds like your {question.topic} may be {value}. "
@@ -190,6 +265,10 @@ def confirmation_text(question, value: str, acknowledgment=None, *, correction=F
     )
 
 
-def clarification_text(question, acknowledgment=None) -> str:
-    bridge = validated_bridge(acknowledgment) or "Take your time."
-    return f"{bridge} {question.prompt} {options_text(question)} Which fits your experience best?"
+def clarification_text(
+    question, acknowledgment=None, *, include_options: bool = True, attempt: int = 0
+) -> str:
+    bridge = validated_bridge(acknowledgment) or CLARIFY_BRIDGES[attempt % len(CLARIFY_BRIDGES)]
+    options = f" {options_text(question)}" if include_options else ""
+    closer = CLARIFY_CLOSERS[attempt % len(CLARIFY_CLOSERS)]
+    return f"{bridge} {question.prompt}{options} {closer}"
