@@ -9,7 +9,7 @@ import pytest
 import phone_app
 from app.patient_repository import InMemoryPatientRepository
 from app.survey_engine import SafeSurveyEngine
-from app.telephony import twilio
+from app.telephony import call_session, twilio
 from app.telephony.call_session import PhoneCallSession
 from app.telephony.config import TelephonyConfigurationError, load_settings
 from app.telephony.deepgram_stt import listen_url, parse_message
@@ -153,10 +153,10 @@ def test_frames_split_audio_into_twenty_millisecond_chunks():
 def test_call_session_runs_a_confirmed_answer():
     session, spoken = build_session()
     asyncio.run(session.begin())
-    assert "survey" in spoken[0]
+    assert "check-in call from your doctor’s office" in spoken[0]
     assert "hip pain" in spoken[0]
     assert "HOOS JR HIP SURVEY" not in spoken[0]
-    assert spoken[0].count("automated survey helper") == 1
+    assert spoken[0].count("automated check-in call") == 1
 
     session.add_transcript("moderate")
     assert asyncio.run(session.flush_utterance()) is False
@@ -206,3 +206,19 @@ def test_speech_chunks_split_long_prompts_into_sentence_groups():
 
 def test_speech_chunks_keep_a_short_prompt_whole():
     assert phone_app.speech_chunks("How is your hip today?") == ["How is your hip today?"]
+
+
+def test_speech_plan_pauses_between_paragraphs():
+    plan = phone_app.speech_plan("Hello there.\n\nQuestion 1 of 6. How is your hip?")
+
+    assert [chunk for chunk, _ in plan] == ["Hello there.", "Question 1 of 6. How is your hip?"]
+    assert plan[0][1] == phone_app.PARAGRAPH_PAUSE_SECONDS
+    assert plan[-1][1] == 0.0
+
+
+def test_spoken_keeps_the_beat_before_the_first_question():
+    spoken = call_session._spoken(
+        "HOOS JR HIP SURVEY\nHello there.\n\nQuestion 1 of 6. How is your hip?"
+    )
+
+    assert spoken == "Hello there.\n\nQuestion 1 of 6. How is your hip?"

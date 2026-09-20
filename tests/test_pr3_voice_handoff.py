@@ -7,7 +7,7 @@ def test_voice_adapter_has_expected_conversation_scripts():
     intro = adapter.doctor_intro("orthopedic")
     closing = adapter.closing_script()
 
-    assert "automated survey helper" in intro.text.lower()
+    assert "automated check-in call" in intro.text.lower()
     assert "survey is complete" in closing.text.lower()
     assert "send" not in closing.text.lower()
 

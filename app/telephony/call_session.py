@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Awaitable, Callable
 
 from ..gait_handoff import GaitHandoff, GaitHandoffService
@@ -122,18 +123,26 @@ class PhoneCallSession:
 
 
 def _spoken(prompt: str) -> str:
-    """Strip the on-screen header lines the engine adds for the text UI."""
+    """Strip the on-screen header lines the engine adds for the text UI.
 
-    lines = [line for line in prompt.splitlines() if line.strip()]
-    spoken = [line for line in lines if not _is_header(line)]
-    return " ".join(spoken) if spoken else " ".join(lines)
+    Blank lines survive: they are the beats the phone bridge plays as silence.
+    """
+
+    paragraphs = []
+    for paragraph in prompt.split("\n\n"):
+        lines = [line for line in paragraph.splitlines() if line.strip()]
+        spoken = [line for line in lines if not _is_header(line)] or lines
+        if spoken:
+            paragraphs.append(" ".join(spoken))
+    return "\n\n".join(paragraphs)
 
 
 def _is_header(line: str) -> bool:
+    """A standalone label, as opposed to a sentence the caller should hear."""
+
     lowered = line.strip().casefold()
     return (
         lowered.endswith("survey")
         or lowered.startswith("condition:")
-        or lowered.startswith("question ")
-        and " of " in lowered
+        or re.fullmatch(r"question \d+ of \d+\.?", lowered) is not None
     )

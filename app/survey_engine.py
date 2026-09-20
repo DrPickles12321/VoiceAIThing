@@ -59,7 +59,7 @@ class SafeSurveyEngine:
             self.session.state = "complete"
             return speech.COMPLETE
         self.session.state = "asking"
-        return f"{speech.INTRO} {self._question_text()} {speech.options_text(self.session.current_question)}"
+        return speech.opening_text(self.session.current_question, len(self.session.questions))
 
     def _retry(self, prompt: str) -> tuple[str, None]:
         self.session.clarification_attempts += 1

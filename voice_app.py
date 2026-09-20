@@ -70,7 +70,7 @@ def create_app(persistence=None) -> FastAPI:
             return
         def warm(questions):
             question = questions[0]
-            prompt = f"{speech.INTRO} {speech.question_text(question, 0, len(questions))} {speech.options_text(question)}"
+            prompt = speech.opening_text(question, len(questions))
             model = os.getenv("DEEPGRAM_TTS_MODEL", DEFAULT_VOICE)
             try:
                 cache_audio((model, prompt), b"".join(stream_speech_with_deepgram(prompt)))

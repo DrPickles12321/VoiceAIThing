@@ -42,11 +42,15 @@ ROOT = Path(__file__).resolve().parent
 VOICE_PATH = "/twilio/voice"
 STATUS_PATH = "/twilio/status"
 MEDIA_PATH = "/twilio/media"
-SILENCE_TIMEOUT_SECONDS = 8.0
+SILENCE_TIMEOUT_SECONDS = 10.0
 FRAME_SECONDS = 0.02
 PLAYBACK_LEAD_SECONDS = 2.0
-SPEECH_CHUNK_CHARS = 90
+FIRST_CHUNK_CHARS = 90
+SPEECH_CHUNK_CHARS = 200
 LINE_OPEN_TIMEOUT_SECONDS = 3.0
+PARAGRAPH_PAUSE_SECONDS = 0.8
+ECHO_GRACE_SECONDS = 0.5
+MULAW_SILENCE = b"\xff" * 160
 CARRIER_FAILURES = {"busy", "no-answer", "failed", "canceled"}
 
 logger = logging.getLogger("phone_app")
@@ -88,9 +92,9 @@ class MediaStreamBridge:
         self._inbound_frames = 0
         self._turn_lock = asyncio.Lock()
         self._tasks: list[asyncio.Task[None]] = []
-        self._playback_task: asyncio.Task[None] | None = None
         self._line_open = asyncio.Event()
         self._greeted = asyncio.Event()
+        self._listen_from = 0.0
 
     async def run(self) -> None:
         await self.websocket.accept()
@@ -179,6 +183,7 @@ class MediaStreamBridge:
             await self._close()
             return
         self.bot_speaking = False
+        self._listen_from = asyncio.get_running_loop().time() + ECHO_GRACE_SECONDS
         self._start_silence_timer()
 
     async def _greet(self) -> None:
@@ -219,10 +224,13 @@ class MediaStreamBridge:
                 continue
             # Nothing the caller says counts as an answer before we have asked.
             await self._greeted.wait()
+            # The handset feeds our own voice back down the inbound track, so
+            # anything heard mid-prompt, or in its echo tail, would otherwise be
+            # transcribed as the caller's answer.
+            if self.bot_speaking or asyncio.get_running_loop().time() < self._listen_from:
+                continue
             if event.kind == "speech_started":
                 self._cancel_silence_timer()
-                if self.bot_speaking:
-                    await self._clear_playback()
             elif event.kind == "transcript" and event.is_final:
                 self._cancel_silence_timer()
                 self.session.add_transcript(event.text)
@@ -237,10 +245,7 @@ class MediaStreamBridge:
         self.bot_speaking = True
         self._mark_counter += 1
         self._last_mark = f"prompt-{self._mark_counter}"
-        playback = asyncio.create_task(self._stream_speech(text, self._last_mark))
-        self._playback_task = playback
-        # Waiting this way keeps a barge-in cancellation local to the playback.
-        await asyncio.wait({playback})
+        await self._stream_speech(text, self._last_mark)
 
     async def _stream_speech(self, text: str, mark: str) -> None:
         """Synthesize the prompt piece by piece and play it at speaking speed.
@@ -248,26 +253,26 @@ class MediaStreamBridge:
         A whole prompt takes seconds to synthesize, which the caller would hear
         as dead air, so each sentence group is rendered while the previous one
         plays. Frames go out just ahead of playback: Twilio buffers everything
-        it receives, so a burst would both make barge-in meaningless and starve
-        the inbound audio Deepgram expects.
+        it receives, so a burst would starve the inbound audio Deepgram expects.
         """
 
         loop = asyncio.get_running_loop()
         started = loop.time()
         sent_frames = 0
-        chunks = speech_chunks(text)
-        pending = asyncio.create_task(self._synthesize(chunks[0]))
-        for index, chunk in enumerate(chunks):
+        plan = speech_plan(text)
+        pending = asyncio.create_task(self._synthesize(plan[0][0]))
+        for index, (chunk, pause) in enumerate(plan):
             audio = await pending
-            if index + 1 < len(chunks):
-                pending = asyncio.create_task(self._synthesize(chunks[index + 1]))
+            if index + 1 < len(plan):
+                pending = asyncio.create_task(self._synthesize(plan[index + 1][0]))
             logger.info(
                 "Speaking %d chars as %.1fs of audio on stream %s",
                 len(chunk),
                 len(audio) / 8000,
                 self.stream_sid,
             )
-            for frame in frames(audio):
+            padding = MULAW_SILENCE * round(pause / FRAME_SECONDS)
+            for frame in frames(audio + padding):
                 await self._send(
                     {
                         "event": "media",
@@ -290,13 +295,6 @@ class MediaStreamBridge:
         return await synthesize_mulaw_async(
             text, self.settings.deepgram_api_key, self.settings.tts_model
         )
-
-    async def _clear_playback(self) -> None:
-        self.bot_speaking = False
-        task, self._playback_task = self._playback_task, None
-        if task is not None:
-            task.cancel()
-        await self._send({"event": "clear", "streamSid": self.stream_sid})
 
     async def _end_after_playback(self) -> None:
         self.hangup_mark = self._last_mark
@@ -335,13 +333,35 @@ class MediaStreamBridge:
             pass
 
 
+def speech_plan(text: str, pause: float = PARAGRAPH_PAUSE_SECONDS) -> list[tuple[str, float]]:
+    """Chunks to speak, each with the silence that follows it.
+
+    A blank line in a prompt is a beat, such as the one between the greeting
+    and the first question, and is played as silence rather than spoken.
+    """
+
+    paragraphs = [part for part in text.split("\n\n") if part.strip()] or [text]
+    plan: list[tuple[str, float]] = []
+    for index, paragraph in enumerate(paragraphs):
+        chunks = speech_chunks(paragraph)
+        trailing = pause if index + 1 < len(paragraphs) else 0.0
+        plan.extend((chunk, 0.0) for chunk in chunks[:-1])
+        plan.append((chunks[-1], trailing))
+    return plan
+
+
 def speech_chunks(text: str, limit: int = SPEECH_CHUNK_CHARS) -> list[str]:
-    """Group a prompt into sentence-sized pieces so speech can start quickly."""
+    """Group a prompt into sentence-sized pieces so speech can start quickly.
+
+    Only the opening piece is kept short: it decides how long the caller waits
+    for the first word, while longer pieces afterwards keep the delivery even.
+    """
 
     chunks: list[str] = []
     current = ""
     for sentence in re.findall(r"[^.!?]+[.!?]*\s*", text.strip()) or [text.strip()]:
-        if current and len(current) + len(sentence) > limit:
+        budget = FIRST_CHUNK_CHARS if not chunks else limit
+        if current and len(current) + len(sentence) > budget:
             chunks.append(current.strip())
             current = sentence
         else:

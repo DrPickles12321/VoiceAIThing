@@ -149,11 +149,15 @@ Exact classification examples (acknowledgment may be null in every case):
   This is a tentative mapping of strongly intensified pain, not a diagnosis.
 """
 
+# A blank line marks a beat the phone survey plays as a short silence.
+PARAGRAPH = "\n\n"
 INTRO = (
-    "Hello, I’m your automated survey helper. Take your time and answer in your own words. "
-    "After each question, just speak. I’ll respond after a brief pause. "
+    "Hi, this is an automated check-in call from your doctor’s office. "
+    "I’m calling to see how you’re doing after your surgery and to collect a few answers for your care team. "
+    "It only takes a couple of minutes. "
+    "Answer each question in your own words, and I’ll respond after a brief pause. "
     "If I interpret your answer, I’ll check with you. "
-    "You can ask me to repeat, pause, or stop."
+    "You can ask me to repeat, pause, or stop at any time."
 )
 COMPLETE = "Thank you for sharing your answers with me. The survey is complete."
 STOPPED = "Of course. We’ll stop here. Thank you for your time."
@@ -170,6 +174,12 @@ MEDICAL_BOUNDARY = (
 
 def question_text(question, index: int, total: int) -> str:
     return f"Question {index + 1} of {total}. {question.prompt}"
+
+
+def opening_text(question, total: int) -> str:
+    """The greeting, a beat, then the first question with its scale."""
+
+    return f"{INTRO}{PARAGRAPH}{question_text(question, 0, total)} {options_text(question)}"
 
 
 def options_text(question) -> str:

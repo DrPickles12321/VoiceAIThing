@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,7 +24,7 @@ ENV = {
 class ScriptedTranscriber:
     """Stand-in for Deepgram that replays a fixed event script."""
 
-    script: list[SpeechEvent] = []
+    queue: list[SpeechEvent] = []
 
     def __init__(self, **kwargs):
         self.audio_frames: list[bytes] = []
@@ -38,11 +39,10 @@ class ScriptedTranscriber:
         self.audio_frames.append(frame)
 
     async def events(self):
-        for event in self.script:
-            await asyncio.sleep(0)
-            yield event
         while True:
-            await asyncio.sleep(0.05)
+            if ScriptedTranscriber.queue:
+                yield ScriptedTranscriber.queue.pop(0)
+            await asyncio.sleep(0.01)
 
 
 @pytest.fixture
@@ -53,6 +53,7 @@ def client(monkeypatch):
     monkeypatch.setattr(phone_app, "synthesize_mulaw_async", fake_tts)
     monkeypatch.setattr(phone_app, "DeepgramTranscriber", ScriptedTranscriber)
     monkeypatch.setattr(phone_app, "_signature_ok", lambda *args, **kwargs: True)
+    ScriptedTranscriber.queue = []
     return TestClient(phone_app.create_app(load_settings(ENV)))
 
 
@@ -129,13 +130,20 @@ def test_start_call_rejects_non_e164_number(client):
     assert response.status_code == 400
 
 
-def test_media_stream_answers_and_records_the_survey(client):
-    ScriptedTranscriber.script = [
-        SpeechEvent("transcript", "moderate", True),
-        SpeechEvent("utterance_end"),
-        SpeechEvent("transcript", "yes", True),
-        SpeechEvent("utterance_end"),
-    ]
+def test_media_stream_answers_and_records_the_survey(client, monkeypatch):
+    monkeypatch.setattr(phone_app, "ECHO_GRACE_SECONDS", 0.0)
+
+    def reply(websocket, outbound, mark: str, said: str) -> None:
+        """Answer once the prompt has played, the way a caller waits their turn."""
+
+        while outbound[-1] != {"event": "mark", "streamSid": "MZ1", "mark": {"name": mark}}:
+            outbound.append(json.loads(websocket.receive_text()))
+        websocket.send_text(json.dumps({"event": "mark", "mark": {"name": mark}}))
+        time.sleep(0.1)
+        ScriptedTranscriber.queue.extend(
+            [SpeechEvent("transcript", said, True), SpeechEvent("utterance_end")]
+        )
+
     with client.websocket_connect("/twilio/media") as websocket:
         websocket.send_text(
             json.dumps(
@@ -158,16 +166,47 @@ def test_media_stream_answers_and_records_the_survey(client):
                 }
             )
         )
-        outbound = []
-        while not outbound or outbound[-1]["event"] != "mark":
+        outbound: list[dict] = [json.loads(websocket.receive_text())]
+        reply(websocket, outbound, "prompt-1", "moderate")
+        reply(websocket, outbound, "prompt-2", "yes")
+        while outbound[-1] != {"event": "mark", "streamSid": "MZ1", "mark": {"name": "prompt-3"}}:
             outbound.append(json.loads(websocket.receive_text()))
         websocket.send_text(json.dumps({"event": "stop"}))
 
     assert outbound[0]["event"] == "media"
     assert outbound[0]["streamSid"] == "MZ1"
     assert base64.b64decode(outbound[0]["media"]["payload"]) == b"\xff" * 160
-    assert outbound[-1] == {"event": "mark", "streamSid": "MZ1", "mark": {"name": "prompt-1"}}
 
     record = client.app.state.persistence.calls["sess-1"]
     assert record.answers == [{"question_id": "hoos_stairs", "value": "moderate"}]
     assert any(line.startswith("patient: moderate") for line in record.transcript)
+
+
+def test_media_stream_ignores_what_it_hears_while_it_is_still_talking(client):
+    """Handsets feed our own prompt back; that must never become an answer."""
+
+    with client.websocket_connect("/twilio/media") as websocket:
+        websocket.send_text(
+            json.dumps(
+                {
+                    "event": "start",
+                    "streamSid": "MZ1",
+                    "start": {
+                        "streamSid": "MZ1",
+                        "callSid": "CA1",
+                        "customParameters": {"patientCode": "RGN-0417", "sessionId": "sess-1"},
+                    },
+                }
+            )
+        )
+        ScriptedTranscriber.queue.extend(
+            [SpeechEvent("transcript", "moderate", True), SpeechEvent("utterance_end")]
+        )
+        outbound = [json.loads(websocket.receive_text())]
+        while outbound[-1]["event"] != "mark":
+            outbound.append(json.loads(websocket.receive_text()))
+        websocket.send_text(json.dumps({"event": "stop"}))
+
+    record = client.app.state.persistence.calls["sess-1"]
+    assert record.answers == []
+    assert not any(line.startswith("patient:") for line in record.transcript)
