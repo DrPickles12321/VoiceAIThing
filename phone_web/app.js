@@ -123,17 +123,26 @@ function render(record) {
   return false;
 }
 
+function stopPolling() {
+  clearInterval(pollTimer);
+  button.disabled = false;
+  button.textContent = "Call patient";
+}
+
 function pollCall(sessionId) {
   clearInterval(pollTimer);
+  // A restarted server forgets in-memory calls; give up rather than poll forever.
+  let misses = 0;
   pollTimer = setInterval(async () => {
     const response = await fetch(`/api/calls/${sessionId}`);
-    if (!response.ok) return;
-    const finished = render(await response.json());
-    if (finished) {
-      clearInterval(pollTimer);
-      button.disabled = false;
-      button.textContent = "Call patient";
+    if (!response.ok) {
+      if (++misses < 8) return;
+      stopPolling();
+      showError("The server no longer has this call — reload the page and dial again.");
+      return;
     }
+    misses = 0;
+    if (render(await response.json())) stopPolling();
   }, 1500);
 }
 
