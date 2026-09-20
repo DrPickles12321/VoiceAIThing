@@ -9,7 +9,7 @@
   <body>
     <main>
       <h1>VoiceAIThing</h1>
-      <p class="muted">Desktop voice survey demo powered by Deepgram transcription.</p>
+      <p class="muted">A check-up conversation, one question at a time.</p>
 
       <label for="patient">Patient code</label>
       <div class="row">
@@ -18,9 +18,15 @@
       </div>
 
       <section id="conversation" aria-live="polite"></section>
-      <button id="record" disabled>Start recording</button>
-      <p id="status" class="muted">Start a survey to begin.</p>
+      <audio id="voice" controls hidden aria-label="Survey helper's voice"></audio>
+      <div class="row">
+        <button id="listen-toggle" disabled>Pause microphone</button>
+        <button id="record" disabled>Send now</button>
+      </div>
+      <p id="status" class="muted" role="status">Start a survey to begin.</p>
+      <p class="muted">After the helper finishes, just speak. Your answer sends automatically after about 1.5 seconds of quiet. Use Pause microphone whenever you need a break, or Send now to send sooner.</p>
     </main>
-    <script src="/static/app.js"></script>
+    <script src="/static/voice_activity.js?v=handsfree-4"></script>
+    <script src="/static/app.js?v=handsfree-4"></script>
   </body>
 </html>

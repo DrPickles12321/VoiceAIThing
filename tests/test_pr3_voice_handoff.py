@@ -7,9 +7,9 @@ def test_voice_adapter_has_expected_conversation_scripts():
     intro = adapter.doctor_intro("orthopedic")
     closing = adapter.closing_script()
 
-    assert "care team" in intro.text.lower()
-    assert "link" in closing.text.lower()
-    assert "gait tracker" in closing.text.lower()
+    assert "automated survey helper" in intro.text.lower()
+    assert "survey is complete" in closing.text.lower()
+    assert "send" not in closing.text.lower()
 
 
 def test_handoff_service_prepares_payload_without_sending_link():

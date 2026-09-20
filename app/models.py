@@ -33,9 +33,12 @@ class SurveyAnswer:
     question_prompt: str
     normalized_value: str
     raw_response: str
-    confidence: float
+    confidence: float | None
     confirmed: bool = False
     clarification_attempts: int = 0
+    # 'confirmed' means patient-authorized: direct option selection or separate
+    # agreement with an inferred proposal. Keep provenance distinct for audit.
+    acceptance_method: str | None = None
 
 
 @dataclass
@@ -45,6 +48,7 @@ class SurveySession:
     state: str = "awaiting_start"
     current_index: int = 0
     answers: list[SurveyAnswer] = field(default_factory=list)
+    pending_answer: SurveyAnswer | None = None
     last_confirmation_prompt: str | None = None
     clarification_attempts: int = 0
     needs_human_review: bool = False

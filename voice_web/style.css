@@ -13,3 +13,5 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 #conversation p { line-height: 1.5; }
 #conversation .user { color: #315c86; }
 #conversation .assistant { color: #2c6844; }
+audio { display: block; width: 100%; margin: 0 0 16px; }
+audio[hidden] { display: none; }

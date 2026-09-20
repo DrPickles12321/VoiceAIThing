@@ -18,10 +18,18 @@ The supported runtime is the safe core under `app/`:
 
 The older `survey_intelligence/` module is retained as reference/demo code only. Do not treat it as the active implementation path.
 
+Optional Postgres/Supabase schema lives under `supabase/migrations/` and is
+documented in `DATABASE.md` / `SECURITY.md`. It must stay additive: no table
+drops, no replacing in-memory runtime defaults, no real PHI, no raw audio,
+and scoring only from confirmed values.
+
 ## Safety principles
 
 - Never guess a condition when a patient code is missing
-- Require explicit confirmation before accepting an answer
+- Accept a clear patient selection of an allowed option directly; require a
+  separate confirmation for AI-inferred or relatively adjusted proposals.
+- Keep stored questions verbatim. Only short, validated non-clinical bridges
+  may be model-written; the engine owns all option-bearing speech and state.
 - Stop after a bounded number of clarification retries and escalate for human review
 - Keep external integrations behind failure-tolerant wrappers
 - Separate demo behavior from production behavior

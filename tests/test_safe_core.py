@@ -23,17 +23,18 @@ def test_question_bank_selection_is_condition_specific():
 def test_survey_engine_runs_a_safe_question_loop():
     engine = SafeSurveyEngine(InMemoryPatientRepository(), "RGN-0417")
     first_prompt = engine.start()
-    assert "HOOS JR HIP SURVEY" in first_prompt
+    assert "automated survey helper" in first_prompt
+    assert HOOS_JR_QUESTIONS[0].prompt in first_prompt
     assert "hip pain" in first_prompt.lower()
 
     prompt, answer = engine.handle_response("mild")
-    assert "You said your" in prompt
+    assert HOOS_JR_QUESTIONS[1].prompt in prompt
     assert answer is not None
     assert answer.normalized_value == "mild"
 
-    prompt, answer = engine.handle_response("yes")
-    assert "Next question" in prompt or "complete" in prompt.lower()
-    assert answer is not None
+    assert answer.confirmed
+    assert answer.acceptance_method == "explicit_selection"
+    assert engine.session.current_index == 1
 
     # The engine should proceed without guessing a condition or inventing answers.
     assert engine.patient.condition_category == ConditionCategory.ORTHOPEDIC
