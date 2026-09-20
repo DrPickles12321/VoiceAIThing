@@ -52,9 +52,11 @@ class PhoneCallSession:
 
     async def begin(self) -> None:
         patient = self.engine.patient
-        self.persistence.start_call(
+        record = self.persistence.start_call(
             self.session_id, patient.patient_code, patient.condition_category.value
         )
+        if record.final_status is None:
+            record.status = "in_progress"
         intro = self.voice.doctor_intro(patient.condition_category.value).text
         first_prompt = self.engine.start()
         await self._say(f"{intro} {_spoken(first_prompt)}")

@@ -36,6 +36,7 @@ VOICE_PATH = "/twilio/voice"
 STATUS_PATH = "/twilio/status"
 MEDIA_PATH = "/twilio/media"
 SILENCE_TIMEOUT_SECONDS = 8.0
+CARRIER_FAILURES = {"busy", "no-answer", "failed", "canceled"}
 
 logger = logging.getLogger("phone_app")
 
@@ -231,6 +232,7 @@ def create_app(settings: TelephonySettings | None = None) -> FastAPI:
     app = FastAPI(title="VoiceAIThing phone survey")
     repository = InMemoryPatientRepository()
     persistence = InMemoryPersistence()
+    sessions_by_call_sid: dict[str, str] = {}
     app.state.settings = resolved
     app.state.persistence = persistence
 
@@ -277,6 +279,10 @@ def create_app(settings: TelephonySettings | None = None) -> FastAPI:
             session_id, payload.patient_code, patient.condition_category.value
         )
         record.status = "dialing"
+        record.call_sid = call.call_sid
+        record.to_number = call.to_number
+        record.carrier_status = call.status
+        sessions_by_call_sid[call.call_sid] = session_id
         return {
             "call_sid": call.call_sid,
             "status": call.status,
@@ -297,6 +303,9 @@ def create_app(settings: TelephonySettings | None = None) -> FastAPI:
             "final_status": record.final_status,
             "transcript": record.transcript,
             "answers": record.answers,
+            "call_sid": record.call_sid,
+            "to_number": record.to_number,
+            "carrier_status": record.carrier_status,
         }
 
     @app.post(VOICE_PATH)
@@ -326,6 +335,14 @@ def create_app(settings: TelephonySettings | None = None) -> FastAPI:
     @app.post(STATUS_PATH)
     async def status(request: Request, CallSid: str = Form(""), CallStatus: str = Form("")) -> Response:
         logger.info("Call %s status %s", CallSid, CallStatus)
+        record = persistence.calls.get(sessions_by_call_sid.get(CallSid, ""))
+        if record is not None and CallStatus:
+            record.carrier_status = CallStatus
+            if CallStatus == "in-progress":
+                record.status = "in_progress"
+            elif CallStatus in CARRIER_FAILURES and record.final_status is None:
+                record.status = "completed"
+                record.final_status = CallStatus
         return Response(status_code=204)
 
     @app.websocket(MEDIA_PATH)

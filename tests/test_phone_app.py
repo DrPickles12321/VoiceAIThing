@@ -99,6 +99,25 @@ def test_start_call_records_dialing_before_twilio_connects(client, monkeypatch):
     assert record["patient_code"] == "RGN-0417"
 
 
+def test_status_webhook_marks_a_call_the_patient_never_answered(client, monkeypatch):
+    async def fake_place_call(**kwargs):
+        return phone_app.twilio.PlacedCall(
+            call_sid="CA2", status="queued", to_number=kwargs["to_number"]
+        )
+
+    monkeypatch.setattr(phone_app.twilio, "place_call_async", fake_place_call)
+    session_id = client.post(
+        "/api/calls", json={"to_number": "+14155550123", "patient_code": "RGN-0417"}
+    ).json()["session_id"]
+
+    client.post("/twilio/status", data={"CallSid": "CA2", "CallStatus": "no-answer"})
+
+    record = client.get(f"/api/calls/{session_id}").json()
+    assert record["status"] == "completed"
+    assert record["final_status"] == "no-answer"
+    assert record["call_sid"] == "CA2"
+
+
 def test_start_call_rejects_unknown_patient(client):
     response = client.post("/api/calls", json={"to_number": "+14155550123", "patient_code": "NOPE"})
     assert response.status_code == 404
