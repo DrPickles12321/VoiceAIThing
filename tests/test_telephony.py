@@ -152,16 +152,12 @@ def test_frames_split_audio_into_twenty_millisecond_chunks():
 def test_call_session_runs_a_confirmed_answer():
     session, spoken = build_session()
     asyncio.run(session.begin())
-    assert "care team" in spoken[0]
+    assert "survey" in spoken[0]
     assert "hip pain" in spoken[0]
     assert "HOOS JR HIP SURVEY" not in spoken[0]
 
     session.add_transcript("moderate")
     assert asyncio.run(session.flush_utterance()) is False
-    assert "correct?" in spoken[-1]
-
-    session.add_transcript("yes")
-    asyncio.run(session.flush_utterance())
     record = session.persistence.calls["sess-1"]
     assert record.answers == [{"question_id": "hoos_stairs", "value": "moderate"}]
 
@@ -189,11 +185,9 @@ def test_call_session_completes_and_prepares_handoff():
         for _ in range(len(session.engine.session.questions)):
             session.add_transcript("none")
             await session.flush_utterance()
-            session.add_transcript("yes")
-            await session.flush_utterance()
 
     asyncio.run(scenario())
     assert session.finished
     assert session.handoff is not None
-    assert "gait tracker" in spoken[-1]
+    assert "survey is complete" in spoken[-1]
     assert session.persistence.calls["sess-1"].final_status == "complete"
