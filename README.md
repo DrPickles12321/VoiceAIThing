@@ -11,6 +11,7 @@ The active runtime is the `app/` package. It enforces:
 - direct option selection and confirmation of inferred answers, with bounded retry limits
 - persisted call metadata in the in-memory fallback layer
 - a voice/handoff boundary that prepares a gait-checker payload without sending real external links
+- a post-survey gait video walkthrough where the same helper stays on the call and guides the patient through placeholder recording steps
 
 The first-release scope is intentionally narrow:
 
@@ -152,11 +153,40 @@ the configured model on synthetic examples (paid API calls), explicitly opt in:
 RUN_LIVE_SURVEY_TESTS=1 python -m pytest -m live -q
 ```
 
+## Gait video walkthrough (stage 2, placeholder directions)
+
+Once the survey reaches `complete`, `app/call_flow.py` (`CheckUpCall`) moves the
+same call into `app/gait_walkthrough.py` (`GaitWalkthroughGuide`). The helper
+thanks the patient, says it will stay on the line, and reads fixed placeholder
+steps one at a time: open the texted link, find a clear hallway, prop the phone
+at waist height, then tap the button and walk away and back. Each step ends by
+asking the patient to say when they are ready. A stopped or escalated survey never
+enters the walkthrough. The gait handoff payload is prepared at the transition;
+no text message or link is actually sent and the helper never speaks a URL.
+
+The step text is application-owned and spoken verbatim. The interpreter only
+classifies the reply as ready, not ready, trouble, repeat, pause, resume, stop,
+medical question, off-topic, or unclear. `SURVEY_EXTRACTOR=exact` matches whole
+phrases only; with `SURVEY_EXTRACTOR=openai` the model may also add one short
+encouragement drawn from a fixed word list, and any other text is dropped. "Stop"
+is honored before the interpreter runs. "Not yet" or "hold on" waits without
+moving on; "repeat" reads the current step again. Trouble and unclear replies
+re-read the step with a gentle bridge, and after three such attempts on one step
+the helper says a person from the care team will follow up and the call ends in
+`escalated`. Medical questions get the same boundary reply as the survey.
+
+API snapshots carry the survey fields unchanged plus `phase`, `call_state`
+(`survey`, `walkthrough`, `complete`, `stopped`, `escalated`), `walkthrough`
+(step, attempts, review flag) and `gait_handoff`. The browser keeps the microphone
+open while `call_state` is `walkthrough` and only releases it when the whole call
+ends. Replace `WALKTHROUGH_STEPS` once the real gait recording UI exists.
+
 ## Validation
 
 ```bash
 . .venv/bin/activate
 python -m pytest -q
+node --test tests/test_voice_ui.cjs
 ```
 
 The repo is intentionally designed as a staged, reviewable stack rather than a giant one-shot rewrite.
@@ -191,7 +221,7 @@ This is pause detection, not semantic end-of-sentence detection: background spee
 or long thinking pauses can still affect it. Use a quiet room or headphones.
 **Pause microphone** releases the mic and discards unsent audio; **Resume listening**
 opens it again. **Send now** is an optional manual override. Microphone access is
-released on completion, page exit, or errors. Spoken “pause” pauses the survey but
+released when the whole call ends (after the walkthrough), on page exit, or on errors. Spoken “pause” pauses the survey but
 keeps listening for “resume”; use the button to switch the microphone off entirely.
 
 ```bash
@@ -202,7 +232,9 @@ python voice_app.py
 
 Open <http://127.0.0.1:8000>, choose a patient code, click **Start survey**, and
 allow microphone access once. After each prompt, just speak and briefly pause;
-no per-answer button press is needed.
+no per-answer button press is needed. After the last survey answer the helper
+continues straight into the gait video walkthrough; say "ready", "it's open" or
+"all done" to move through the placeholder steps.
 Your transcript appears as **You:** in the conversation. Use `RGN-0417` for the
 orthopedic/HOOS JR branch or `RGN-0500` for the stroke branch.
 

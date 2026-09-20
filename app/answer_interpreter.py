@@ -194,18 +194,23 @@ class OpenAIAnswerInterpreter:
             return Interpretation()
 
 
-def build_answer_interpreter() -> AnswerInterpreter:
+def configured_openai_client():
+    """The shared LLM client, or None when the app should run offline."""
     mode = os.getenv("SURVEY_EXTRACTOR", "exact").strip().casefold()
     if mode == "exact":
-        return ExactAnswerInterpreter()
+        return None
     if mode != "openai":
         raise ValueError("SURVEY_EXTRACTOR must be 'exact' or 'openai'.")
     if not os.getenv("OPENAI_API_KEY", "").strip():
         # The local demo remains usable with just Deepgram configured.
-        return ExactAnswerInterpreter()
+        return None
     from openai import OpenAI
 
-    return OpenAIAnswerInterpreter(
-        OpenAI(timeout=15.0, max_retries=0),
-        model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
-    )
+    return OpenAI(timeout=15.0, max_retries=0)
+
+
+def build_answer_interpreter() -> AnswerInterpreter:
+    client = configured_openai_client()
+    if client is None:
+        return ExactAnswerInterpreter()
+    return OpenAIAnswerInterpreter(client, model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"))

@@ -125,7 +125,7 @@ player.addEventListener("play", () => {
 });
 player.addEventListener("ended", () => {
   awaitingUser = true;
-  if (finished) status.textContent = "Survey finished. Microphone off.";
+  if (finished) status.textContent = "Call finished. Microphone off.";
   else if (micPaused) status.textContent = "Microphone paused. Press Resume listening when ready.";
   beginListening();
 });
@@ -153,7 +153,9 @@ async function sendRecording(blob, recordedSessionId) {
     const data = await readResponse(response);
     addLine("user", data.transcript);
     addLine("assistant", data.prompt);
-    finished = ["complete", "escalated", "stopped"].includes(data.state);
+    // The survey's own "complete" state hands over to the video walkthrough;
+    // only the whole call ending switches the microphone off.
+    finished = ["complete", "escalated", "stopped"].includes(data.call_state ?? data.state);
     if (finished) releaseMicrophone();
     await speak(data);
   } catch (error) {

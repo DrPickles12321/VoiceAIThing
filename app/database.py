@@ -161,7 +161,9 @@ class DatabaseConversationStore:
         if answer is not None:
             self._upsert_response(session_id, answer, patient_text)
         engine_state = str(snapshot.get("state") or "")
-        if engine_state in TERMINAL_STATUS:
+        # Walkthrough turns after the survey keep arriving with a terminal survey
+        # state; the survey instance is closed exactly once.
+        if engine_state in TERMINAL_STATUS and not self._sessions[session_id].get("completed"):
             self._complete(session_id, TERMINAL_STATUS[engine_state], engine_state)
 
     def list_results(self, patient_code: str | None = None) -> list[dict[str, object]]:
@@ -284,6 +286,7 @@ class DatabaseConversationStore:
 
     def _complete(self, session_id: str, status: str, engine_state: str) -> None:
         state = self._sessions[session_id]
+        state["completed"] = True
         instance_payload: dict[str, Any] = {"status": status}
         call_payload: dict[str, Any] = {"status": "completed" if status == "completed" else "failed"}
         if status in {"completed", "needs_review"}:

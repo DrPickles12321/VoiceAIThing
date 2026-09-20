@@ -6,7 +6,7 @@ const vm = require("node:vm");
 const path = require("node:path");
 const { TurnDetector } = require("../voice_web/voice_activity.js");
 
-function setup({ microphoneError, speechError, responseState = "awaiting_confirmation", uploadError } = {}) {
+function setup({ microphoneError, speechError, responseState = "awaiting_confirmation", callState, uploadError } = {}) {
   const mediaRequests = [];
   class Element {
     constructor() { this.listeners = {}; this.children = []; this.paused = true; this.value = "RGN-0417"; }
@@ -69,6 +69,7 @@ function setup({ microphoneError, speechError, responseState = "awaiting_confirm
         if (uploadError) return new Response(JSON.stringify({ detail: "Transcription unavailable" }), { status: 502 });
         return new Response(JSON.stringify({
           transcript: "Mild.", prompt: "Is mild right?", prompt_id: "turn-2", state: responseState,
+          ...(callState ? { call_state: callState } : {}),
         }));
       }
       return new Response(JSON.stringify({ session_id: "session-1", prompt: "First question.", prompt_id: "turn-1", state: "asking" }));
@@ -191,6 +192,36 @@ test("completion releases the mic and does not start another recording", async (
   assert.equal(app.recorder.state, "inactive");
   assert.equal(e.record.disabled, true);
   assert.equal(e.start.disabled, false);
+});
+
+test("a completed survey keeps listening while the call moves into the video walkthrough", async () => {
+  const app = setup({ responseState: "complete", callState: "walkthrough" });
+  const e = app.elements;
+  await e.start.emit("click");
+  await e.voice.end();
+  app.tick(250, 0.08);
+  app.tick(1500);
+  await app.recorder.stopped;
+  await e.voice.end();
+  assert.equal(app.stoppedTracks, 0);
+  assert.equal(app.recorder.state, "recording");
+  assert.equal(e.record.disabled, false);
+  assert.equal(e.start.disabled, true);
+  assert.match(e.status.textContent, /Listening/);
+});
+
+test("the walkthrough ending releases the mic like any other call ending", async () => {
+  const app = setup({ responseState: "complete", callState: "complete" });
+  const e = app.elements;
+  await e.start.emit("click");
+  await e.voice.end();
+  app.tick(250, 0.08);
+  app.tick(1500);
+  await app.recorder.stopped;
+  await e.voice.end();
+  assert.equal(app.stoppedTracks, 1);
+  assert.equal(app.recorder.state, "inactive");
+  assert.match(e.status.textContent, /Call finished/);
 });
 
 test("an upload failure stops automatic retries and allows manual recovery", async () => {

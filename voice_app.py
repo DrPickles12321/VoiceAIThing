@@ -23,8 +23,9 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from app.patient_repository import InMemoryPatientRepository
-from app.answer_interpreter import OpenAIAnswerInterpreter, build_answer_interpreter
-from app.survey_engine import SafeSurveyEngine
+from app.answer_interpreter import OpenAIAnswerInterpreter, build_answer_interpreter, configured_openai_client
+from app.call_flow import CheckUpCall
+from app.gait_walkthrough import build_walkthrough_interpreter
 from app.deepgram import DEFAULT_VOICE, stream_speech_with_deepgram, transcribe_with_deepgram
 from app import conversation_policy as speech
 from app.question_loader import QUESTION_BANKS
@@ -37,10 +38,13 @@ MAX_AUDIO_BYTES = 10 * 1024 * 1024
 def create_app(persistence=None) -> FastAPI:
     load_dotenv(ROOT / ".env")
     interpreter = build_answer_interpreter()
+    walkthrough_interpreter = build_walkthrough_interpreter(
+        configured_openai_client(), model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+    )
     store = persistence if persistence is not None else build_persistence()
     app = FastAPI(title="VoiceAIThing desktop voice survey")
     app.state.persistence = store
-    sessions: dict[str, SafeSurveyEngine] = {}
+    sessions: dict[str, CheckUpCall] = {}
     session_locks: dict[str, RLock] = {}
     # Only the current application-produced prompt can be synthesized. The
     # browser cannot submit arbitrary text or change the survey's spoken wording.
@@ -113,7 +117,10 @@ def create_app(persistence=None) -> FastAPI:
     @app.post("/api/sessions")
     def create_session(patient_code: str = "RGN-0417") -> dict[str, object]:
         try:
-            engine = SafeSurveyEngine(InMemoryPatientRepository(), patient_code, interpreter=interpreter)
+            engine = CheckUpCall(
+                InMemoryPatientRepository(), patient_code,
+                interpreter=interpreter, walkthrough_interpreter=walkthrough_interpreter,
+            )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         session_id = str(uuid4())

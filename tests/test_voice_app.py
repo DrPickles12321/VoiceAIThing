@@ -218,3 +218,41 @@ def test_voice_turns_persist_patient_id_transcript_and_survey_results(monkeypatc
     assert "patient: mild" in row["transcript"]
     assert row["survey_results"][0]["question_key"] == "hoos_stairs"
     assert row["survey_results"][0]["confirmed_value"] == "mild"
+
+
+def test_audio_route_keeps_the_call_open_through_the_video_walkthrough(monkeypatch):
+    store = InMemoryPersistence()
+    monkeypatch.setenv("DEEPGRAM_API_KEY", "synthetic-test-key")
+    monkeypatch.setenv("SURVEY_EXTRACTOR", "exact")
+    transcripts = iter(["mild"] * 6 + ["it's open", "help", "I'm there", "ready", "all done"])
+    monkeypatch.setattr(voice_app, "transcribe_with_deepgram", lambda *args: next(transcripts))
+    with TestClient(create_app(persistence=store)) as client:
+        started = client.post("/api/sessions", params={"patient_code": "RGN-0417"}).json()
+        assert started["call_state"] == "survey"
+        url = f"/api/sessions/{started['session_id']}/audio"
+        files = {"audio": ("answer.webm", b"synthetic-audio", "audio/webm")}
+        for _ in range(5):
+            client.post(url, files=files)
+        finished_survey = client.post(url, files=files).json()
+        assert finished_survey["state"] == "complete"
+        assert finished_survey["call_state"] == "walkthrough"
+        assert finished_survey["walkthrough"]["current_step"] == "open_link"
+        assert "one last part" in finished_survey["prompt"]
+        assert finished_survey["gait_handoff"] == {"status": "prepared", "condition_category": "orthopedic"}
+        assert "http" not in finished_survey["prompt"]
+        opened = client.post(url, files=files).json()
+        assert opened["walkthrough"]["current_step"] == "find_space"
+        stuck = client.post(url, files=files).json()
+        assert stuck["walkthrough"] == {**opened["walkthrough"], "help_attempts": 1}
+        assert len(stuck["answers"]) == 6
+        client.post(url, files=files)
+        client.post(url, files=files)
+        done = client.post(url, files=files).json()
+        assert done["call_state"] == "complete"
+        assert done["prompt"].startswith("Wonderful, you did it.")
+        results = client.get("/api/results", params={"patient_code": "RGN-0417"}).json()["results"]
+    assert len(results) == 1
+    assert results[0]["status"] == "completed"
+    assert results[0]["transcript"].count("patient: mild") == 6
+    assert "patient: all done" in results[0]["transcript"]
+    assert len(results[0]["survey_results"]) == 6
