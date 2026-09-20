@@ -109,29 +109,35 @@ def place_call(
 ) -> PlacedCall:
     """Dial ``to_number`` and point Twilio at ``answer_url`` for the TwiML.
 
-    Trial accounts reject the status-callback parameters, so the call is retried
-    without them instead of failing.
+    Trial accounts reject optional parameters, so the request is retried with
+    progressively fewer of them instead of failing.
     """
 
-    required = [
+    minimal = [
         ("To", require_e164(to_number)),
         ("From", require_e164(from_number)),
         ("Url", answer_url),
-        ("Method", "POST"),
     ]
-    optional: list[tuple[str, str]] = []
+    status_fields: list[tuple[str, str]] = []
     if status_callback_url:
-        optional.append(("StatusCallback", status_callback_url))
-        optional.append(("StatusCallbackMethod", "POST"))
+        status_fields.append(("StatusCallback", status_callback_url))
+        status_fields.append(("StatusCallbackMethod", "POST"))
         for event in ("initiated", "ringing", "answered", "completed"):
-            optional.append(("StatusCallbackEvent", event))
+            status_fields.append(("StatusCallbackEvent", event))
 
-    try:
-        payload = _post_call(account_sid, auth_token, required + optional, timeout)
-    except TwilioError as exc:
-        if not optional or "limited parameter access" not in str(exc):
-            raise
-        payload = _post_call(account_sid, auth_token, required, timeout)
+    attempts = [
+        minimal + [("Method", "POST")] + status_fields,
+        minimal + [("Method", "POST")],
+        minimal,
+    ]
+    for index, fields in enumerate(attempts):
+        try:
+            payload = _post_call(account_sid, auth_token, fields, timeout)
+            break
+        except TwilioError as exc:
+            last_attempt = index == len(attempts) - 1
+            if last_attempt or "limited parameter access" not in str(exc):
+                raise
     return PlacedCall(
         call_sid=str(payload.get("sid", "")),
         status=str(payload.get("status", "unknown")),
