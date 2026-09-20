@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from dataclasses import dataclass
 from typing import AsyncIterator, Awaitable, Callable
 from urllib.parse import urlencode
@@ -8,6 +10,9 @@ from urllib.parse import urlencode
 import websockets
 
 DEEPGRAM_LISTEN_URL = "wss://api.deepgram.com/v1/listen"
+KEEPALIVE_TIMEOUT_SECONDS = 60.0
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -84,27 +89,50 @@ class DeepgramTranscriber:
         self.utterance_end_ms = utterance_end_ms
         self._connect = connect or websockets.connect
         self._socket = None
+        self._closed = False
 
-    async def __aenter__(self) -> "DeepgramTranscriber":
-        self._socket = await self._connect(
+    async def _open(self) -> object:
+        return await self._connect(
             listen_url(self.model, self.utterance_end_ms),
             additional_headers={"Authorization": f"Token {self.api_key}"},
+            ping_timeout=KEEPALIVE_TIMEOUT_SECONDS,
         )
+
+    async def _reconnect(self, dead: object) -> None:
+        """Replace a socket that dropped mid-call, unless someone beat us to it."""
+
+        if self._closed or self._socket is not dead:
+            return
+        logger.warning("Deepgram socket dropped; reconnecting")
+        self._socket = None
+        self._socket = await self._open()
+
+    async def __aenter__(self) -> "DeepgramTranscriber":
+        self._socket = await self._open()
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
         await self.close()
 
     async def send_audio(self, frame: bytes) -> None:
+        """Push one audio frame, reopening the socket if Deepgram dropped it."""
+
         if self._socket is None:
             raise RuntimeError("Transcriber is not connected.")
-        await self._socket.send(frame)
+        socket = self._socket
+        try:
+            await socket.send(frame)
+        except websockets.exceptions.WebSocketException:
+            await self._reconnect(socket)
+            if self._socket is not None:
+                await self._socket.send(frame)
 
     async def finalize(self) -> None:
         if self._socket is not None:
             await self._socket.send(json.dumps({"type": "Finalize"}))
 
     async def close(self) -> None:
+        self._closed = True
         socket, self._socket = self._socket, None
         if socket is None:
             return
@@ -115,9 +143,24 @@ class DeepgramTranscriber:
         await socket.close()
 
     async def events(self) -> AsyncIterator[SpeechEvent]:
+        """Yield recognized speech for the life of the call, across reconnects."""
+
         if self._socket is None:
             raise RuntimeError("Transcriber is not connected.")
-        async for raw in self._socket:
-            event = parse_message(raw)
-            if event is not None:
-                yield event
+        while not self._closed:
+            socket = self._socket
+            if socket is None:
+                return
+            try:
+                async for raw in socket:
+                    event = parse_message(raw)
+                    if event is not None:
+                        yield event
+            except websockets.exceptions.WebSocketException:
+                pass
+            if self._closed:
+                return
+            try:
+                await self._reconnect(socket)
+            except OSError:
+                await asyncio.sleep(0.5)

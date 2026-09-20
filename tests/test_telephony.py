@@ -5,6 +5,7 @@ import base64
 import json
 
 import pytest
+from websockets.exceptions import ConnectionClosedError
 
 import phone_app
 from app.patient_repository import InMemoryPatientRepository
@@ -12,7 +13,7 @@ from app.survey_engine import SafeSurveyEngine
 from app.telephony import call_session, twilio
 from app.telephony.call_session import PhoneCallSession
 from app.telephony.config import TelephonyConfigurationError, load_settings
-from app.telephony.deepgram_stt import listen_url, parse_message
+from app.telephony.deepgram_stt import DeepgramTranscriber, listen_url, parse_message
 from app.telephony.deepgram_tts import MULAW_FRAME_BYTES, frames, speak_url
 
 ENV = {
@@ -222,3 +223,41 @@ def test_spoken_keeps_the_beat_before_the_first_question():
     )
 
     assert spoken == "Hello there.\n\nQuestion 1 of 6. How is your hip?"
+
+
+class DroppingSocket:
+    """A Deepgram socket that dies once, the way a keepalive timeout does."""
+
+    def __init__(self, fails: bool):
+        self.fails = fails
+        self.sent: list[bytes] = []
+        self.closed = False
+
+    async def send(self, frame) -> None:
+        if self.fails:
+            raise ConnectionClosedError(None, None)
+        self.sent.append(frame)
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def test_transcriber_reopens_a_socket_that_dropped_mid_call():
+    """A dead STT socket must not cost us the rest of the caller's audio."""
+
+    sockets = [DroppingSocket(fails=True), DroppingSocket(fails=False)]
+    opened: list[DroppingSocket] = []
+
+    async def connect(url, **kwargs):
+        opened.append(sockets[len(opened)])
+        return opened[-1]
+
+    async def run() -> None:
+        async with DeepgramTranscriber("dg-key", connect=connect) as transcriber:
+            await transcriber.send_audio(b"\xff" * 160)
+
+    asyncio.run(run())
+
+    assert len(opened) == 2
+    assert opened[1].sent[0] == b"\xff" * 160
+    assert opened[1].closed

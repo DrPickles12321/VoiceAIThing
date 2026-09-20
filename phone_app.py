@@ -23,6 +23,7 @@ from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketD
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from websockets.exceptions import WebSocketException
 
 from app.answer_interpreter import (
     AnswerInterpreter,
@@ -176,7 +177,12 @@ class MediaStreamBridge:
                 logger.info(
                     "Stream %s received %d inbound frames", self.stream_sid, self._inbound_frames
                 )
-            await self.transcriber.send_audio(base64.b64decode(payload))
+            try:
+                await self.transcriber.send_audio(base64.b64decode(payload))
+            except (OSError, WebSocketException) as error:
+                # Losing transcription should not drop the call: the survey can
+                # still speak, and the next frame retries the connection.
+                logger.warning("Dropping audio frame: %s", error)
 
     async def _on_mark(self, message: dict[str, Any]) -> None:
         name = message.get("mark", {}).get("name")
