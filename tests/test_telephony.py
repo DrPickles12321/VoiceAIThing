@@ -133,10 +133,13 @@ def test_listen_and_speak_urls_use_telephony_audio_format():
     assert "encoding=mulaw" in speak and "container=none" in speak
 
 
-def test_listen_url_boosts_the_answer_words_on_nova_3_only():
+def test_listen_url_boosts_the_answer_words_per_model_family():
     listen = listen_url("nova-3", 1200)
     assert "keyterm=moderate" in listen and "keyterm=mild" in listen
-    assert "keyterm" not in listen_url("nova-2-phonecall", 1200)
+    phonecall = listen_url("nova-2-phonecall", 1200)
+    assert "keyterm=" not in phonecall
+    assert "keywords=moderate%3A1.5" in phonecall
+    assert "keyterm" not in listen_url("nova-3", 1200, keyterms=())
 
 
 def test_parse_message_normalizes_deepgram_events():

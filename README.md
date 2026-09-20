@@ -200,6 +200,16 @@ header validates against `TWILIO_AUTH_TOKEN`.
 `python scripts/check_deepgram.py` verifies the Deepgram speech round trip in
 the telephony audio format without placing a call.
 
+Tuning what the patient hears and how well they are understood:
+
+- `DEEPGRAM_STT_MODEL`: `nova-3` (default) or `nova-2-phonecall`, which is
+  trained on 8 kHz call audio. Either way the survey answer words (none, mild,
+  moderate, …) are boosted, via `keyterm` on Nova-3 and `keywords` elsewhere.
+- `DEEPGRAM_TTS_MODEL`: any Aura-2 voice. `python scripts/audition_voices.py`
+  renders the call opening in a handful of warm voices to `voice_samples/` so you
+  can pick one by ear before changing it.
+- `UTTERANCE_END_MS`: how long a silence ends the patient's turn (default 1200).
+
 ## Desktop voice demo with Deepgram
 
 The local voice app uses the browser microphone, sends each recording to the

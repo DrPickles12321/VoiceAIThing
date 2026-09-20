@@ -12,7 +12,12 @@ import websockets
 DEEPGRAM_LISTEN_URL = "wss://api.deepgram.com/v1/listen"
 KEEPALIVE_TIMEOUT_SECONDS = 60.0
 # Words the survey lives or dies on, boosted so a narrowband phone line does not
-# turn "mild" into "my old". Deepgram takes these on nova-3 only.
+# turn "mild" into "my old". Nova-3 takes them as ``keyterm``; older models
+# (including the phone-tuned ``nova-2-phonecall``) as weighted ``keywords``.
+KEYWORD_BOOST = 1.5
+# How long a pause Deepgram treats as the end of a phrase. Callers on a phone
+# hesitate mid-answer ("like... a moderate amount"), so this is generous.
+ENDPOINTING_MS = 500
 ANSWER_KEYTERMS = (
     "none",
     "mild",
@@ -57,12 +62,16 @@ def listen_url(
             "smart_format": "true",
             "interim_results": "true",
             "vad_events": "true",
-            "endpointing": 300,
+            "endpointing": ENDPOINTING_MS,
             "utterance_end_ms": utterance_end_ms,
         }
     )
-    if model.startswith("nova-3"):
-        query += "&" + urlencode([("keyterm", term) for term in keyterms])
+    if keyterms:
+        if model.startswith("nova-3"):
+            boost = [("keyterm", term) for term in keyterms]
+        else:
+            boost = [("keywords", f"{term}:{KEYWORD_BOOST}") for term in keyterms]
+        query += "&" + urlencode(boost)
     return f"{DEEPGRAM_LISTEN_URL}?{query}"
 
 
