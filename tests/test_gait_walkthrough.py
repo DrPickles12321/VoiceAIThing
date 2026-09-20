@@ -1,23 +1,24 @@
+import json
 from unittest.mock import Mock
 
+from app import conversation_policy as speech
 from app.call_flow import CheckUpCall
-from app.conversation_policy import MEDICAL_BOUNDARY
 from app.gait_walkthrough import (
+    COMPANION_INSTRUCTIONS,
     CONGRATULATIONS,
-    MAX_HELP_ATTEMPTS,
+    MAX_STALLED_TURNS,
     REVIEW,
     STOPPED,
     TRANSITION,
-    WAITING,
     WALKTHROUGH_STEPS,
+    CompanionTurn,
     GaitWalkthroughGuide,
-    OpenAIWalkthroughInterpreter,
-    StepInterpretation,
-    build_walkthrough_interpreter,
-    validated_step_interpretation,
+    OpenAIWalkthroughCompanion,
+    ScriptedWalkthroughCompanion,
+    build_walkthrough_companion,
+    validated_turn,
 )
 from app.patient_repository import InMemoryPatientRepository
-from app import conversation_policy as speech
 
 
 def finished_survey(**kwargs) -> CheckUpCall:
@@ -28,140 +29,167 @@ def finished_survey(**kwargs) -> CheckUpCall:
     return call
 
 
-class FixedInterpreter:
-    def __init__(self, *results):
-        self.results = iter(results)
-        self.seen = []
+class FakeCompanion:
+    """Stands in for the model: returns scripted turns and records what it was shown."""
 
-    def interpret(self, transcript, step):
-        self.seen.append((transcript, step.id))
-        return next(self.results)
+    def __init__(self, *turns):
+        self.turns = iter(turns)
+        self.calls = []
+
+    def respond(self, transcript, steps, step_index, history):
+        self.calls.append({"transcript": transcript, "step": steps[step_index].id, "history": list(history)})
+        return next(self.turns)
 
 
-def test_guide_speaks_every_step_verbatim_and_congratulates_at_the_end():
-    guide = GaitWalkthroughGuide()
-    opening = guide.start()
-    assert opening == f"{TRANSITION} {WALKTHROUGH_STEPS[0].instruction}"
-    assert guide.snapshot()["state"] == "guiding"
-    for step in WALKTHROUGH_STEPS[1:]:
-        prompt = guide.handle_response("ready")
-        assert prompt.endswith(step.instruction)
-        assert guide.snapshot()["current_step"] == step.id
-    assert guide.handle_response("all done") == CONGRATULATIONS
+def model_client(*payloads):
+    client = Mock()
+    choices = []
+    for payload in payloads:
+        choice = Mock(finish_reason="stop")
+        choice.message.refusal = None
+        choice.message.content = json.dumps(payload) if isinstance(payload, dict) else payload
+        choices.append(Mock(choices=[choice]))
+    client.chat.completions.create.side_effect = choices
+    return client
+
+
+def test_opening_is_fixed_and_the_companion_speaks_for_every_later_turn():
+    companion = FakeCompanion(
+        CompanionTurn("stay", "Hello Margaret, lovely to keep chatting. Do you see a new text message on your phone?"),
+        CompanionTurn("advance", "Wonderful, that's it open. Now, is there a hallway or clear bit of floor nearby where you could take about ten steps in a straight line? Somewhere with good light. Tell me when you're there."),
+    )
+    guide = GaitWalkthroughGuide(companion=companion)
+    assert guide.start() == f"{TRANSITION} {WALKTHROUGH_STEPS[0].instruction}"
+    first = guide.handle_response("Oh hello dear, my name is Margaret, my daughter is just fetching the phone")
+    assert first.startswith("Hello Margaret")
+    assert guide.snapshot()["current_step"] == "open_link"
+    second = guide.handle_response("Right, she's tapped it and there's a page with a big picture of a camera")
+    assert second.startswith("Wonderful, that's it open.")
+    assert guide.snapshot()["current_step"] == "find_space"
+    assert guide.snapshot()["stalled_turns"] == 0
+    # The companion sees the whole walkthrough so far, not just the last line.
+    assert companion.calls[1]["step"] == "open_link"
+    assert [turn["role"] for turn in companion.calls[1]["history"]] == ["assistant", "user", "assistant"]
+    assert companion.calls[1]["history"][1]["content"].startswith("Oh hello dear")
+
+
+def test_the_guide_moves_at_most_one_step_per_turn_and_owns_the_ending():
+    companion = FakeCompanion(*[CompanionTurn("advance", "Great, on to the next bit.")] * 3 + [CompanionTurn("advance", "")])
+    guide = GaitWalkthroughGuide(companion=companion)
+    guide.start()
+    for expected in ("find_space", "place_phone", "record_walk"):
+        guide.handle_response("done, what's next, and the one after that too")
+        assert guide.snapshot()["current_step"] == expected
+    assert guide.handle_response("finished walking") == CONGRATULATIONS  # Empty reply -> fixed closing.
     assert guide.snapshot()["state"] == "complete"
-    assert guide.is_active is False
-    # Terminal states stay put, whatever is heard afterwards.
-    assert guide.handle_response("ready") == CONGRATULATIONS
+    assert guide.snapshot()["current_step"] is None
+    assert guide.handle_response("hello?") == CONGRATULATIONS
 
 
-def test_not_ready_waits_without_moving_on_and_repeat_reads_the_same_step():
-    guide = GaitWalkthroughGuide()
+def test_stay_keeps_the_step_and_a_long_stall_hands_over_to_a_person():
+    companion = FakeCompanion(*[CompanionTurn("stay", "No rush at all, take your time.")] * MAX_STALLED_TURNS)
+    guide = GaitWalkthroughGuide(companion=companion)
     guide.start()
-    assert guide.handle_response("hold on") == WAITING
-    assert guide.snapshot() == {
-        "state": "paused", "step_index": 0, "step_count": len(WALKTHROUGH_STEPS),
-        "current_step": "open_link", "help_attempts": 0, "needs_human_review": False,
-    }
-    assert guide.handle_response("the weather is nice today") == WAITING  # Unclear while paused keeps waiting.
-    assert guide.snapshot()["help_attempts"] == 0
-    assert guide.handle_response("repeat that") == f"Of course. {WALKTHROUGH_STEPS[0].instruction}"
-    assert guide.snapshot()["state"] == "guiding"
-    assert guide.snapshot()["step_index"] == 0
-
-
-def test_trouble_and_unclear_replies_retry_the_step_then_escalate():
-    guide = GaitWalkthroughGuide()
-    guide.start()
-    first = guide.handle_response("I don't see it")
-    assert first.endswith(WALKTHROUGH_STEPS[0].instruction)
-    assert guide.snapshot()["help_attempts"] == 1
-    second = guide.handle_response("the cat is on the roof")
-    assert second.endswith(WALKTHROUGH_STEPS[0].instruction)
-    assert guide.snapshot()["help_attempts"] == 2
-    assert guide.handle_response("it's not working") == REVIEW
-    assert guide.snapshot()["help_attempts"] == MAX_HELP_ATTEMPTS
+    for attempt in range(1, MAX_STALLED_TURNS):
+        assert guide.handle_response("still looking") == "No rush at all, take your time."
+        assert guide.snapshot()["stalled_turns"] == attempt
+        assert guide.snapshot()["current_step"] == "open_link"
+    assert guide.handle_response("still nothing") == REVIEW
     assert guide.snapshot()["state"] == "escalated"
     assert guide.snapshot()["needs_human_review"] is True
 
 
-def test_progress_resets_the_help_counter_for_the_next_step():
-    guide = GaitWalkthroughGuide()
+def test_stop_and_escalate_end_the_call_with_the_companion_words_when_valid():
+    guide = GaitWalkthroughGuide(companion=FakeCompanion(CompanionTurn("stop", "Of course, we'll leave it there. Bye for now.")))
     guide.start()
-    guide.handle_response("help")
-    guide.handle_response("help")
-    guide.handle_response("it's open")
-    assert guide.snapshot()["help_attempts"] == 0
-    assert guide.snapshot()["current_step"] == "find_space"
-
-
-def test_stop_ends_the_walkthrough_and_medical_questions_get_the_boundary_only():
-    guide = GaitWalkthroughGuide(interpreter=FixedInterpreter(
-        StepInterpretation("medical_question", "You're doing well."),
-    ))
-    guide.start()
-    prompt = guide.handle_response("should I take my pain pills first?")
-    assert prompt == f"{MEDICAL_BOUNDARY} {WALKTHROUGH_STEPS[0].instruction}"
-    assert guide.snapshot()["step_index"] == 0
-    assert guide.handle_response("stop") == STOPPED  # Controls work even with the model bypassed.
+    assert guide.handle_response("I think I've had enough for today thank you") == "Of course, we'll leave it there. Bye for now."
     assert guide.snapshot()["state"] == "stopped"
-    assert guide.handle_response("ready") == STOPPED
 
-
-def test_model_output_can_only_pick_an_intent_and_a_vetted_encouragement():
-    assert validated_step_interpretation({"intent": "ready"}) == StepInterpretation()
-    assert validated_step_interpretation(StepInterpretation("advance_two_steps")) == StepInterpretation()
-    kept = validated_step_interpretation(StepInterpretation("ready", "You're doing really well, there's no rush."))
-    assert kept.acknowledgment == "You're doing really well, there's no rush."
-    dropped = validated_step_interpretation(StepInterpretation("ready", "Now tap the red button at the top."))
-    assert dropped == StepInterpretation("ready", None)
-
-    guide = GaitWalkthroughGuide(interpreter=FixedInterpreter(
-        StepInterpretation("ready", "Great, you're doing well."),
-        StepInterpretation("ready", "Now press the green arrow and then swipe left."),
-    ))
+    guide = GaitWalkthroughGuide(companion=FakeCompanion(CompanionTurn("escalate", None)))
     guide.start()
-    assert guide.handle_response("okay my daughter opened it") == f"Great, you're doing well. {WALKTHROUGH_STEPS[1].instruction}"
-    assert guide.handle_response("we're in the hall now") == f"Lovely, well done. {WALKTHROUGH_STEPS[2].instruction}"
+    assert guide.handle_response("I feel dizzy and I'm frightened to walk") == REVIEW
+    assert guide.snapshot()["state"] == "escalated"
+    assert guide.snapshot()["needs_human_review"] is True
 
 
-def test_interpreter_failures_and_oversized_transcripts_count_as_unclear():
+def test_a_plain_spoken_stop_never_reaches_the_model():
+    companion = FakeCompanion()  # Any call would raise StopIteration.
+    guide = GaitWalkthroughGuide(companion=companion)
+    guide.start()
+    assert guide.handle_response("stop please") == STOPPED
+    assert companion.calls == []
+    assert guide.snapshot()["state"] == "stopped"
+
+
+def test_invalid_model_output_falls_back_to_the_fixed_script():
+    assert validated_turn({"action": "advance", "reply": "x"}) == CompanionTurn()
+    assert validated_turn(CompanionTurn("skip_to_end", "hi")) == CompanionTurn()
+    assert validated_turn(CompanionTurn("stay", "Tap the link at www.example.com to continue.")) == CompanionTurn("stay", None)
+    assert validated_turn(CompanionTurn("stay", "word " * 91)) == CompanionTurn("stay", None)
+    assert validated_turn(CompanionTurn("stay", "  Take   your time.  ")) == CompanionTurn("stay", "Take your time.")
+
     class Broken:
-        def interpret(self, transcript, step):
+        def respond(self, *args):
             raise RuntimeError("provider down")
 
-    guide = GaitWalkthroughGuide(interpreter=Broken())
+    guide = GaitWalkthroughGuide(companion=Broken())
     guide.start()
-    assert guide.handle_response("ready").endswith(WALKTHROUGH_STEPS[0].instruction)
-    assert guide.snapshot()["help_attempts"] == 1
-    guide = GaitWalkthroughGuide()
+    prompt = guide.handle_response("okay it's open now")
+    assert prompt.endswith(WALKTHROUGH_STEPS[0].instruction)
+    assert guide.snapshot()["stalled_turns"] == 1
+    guide = GaitWalkthroughGuide(companion=FakeCompanion(CompanionTurn("advance", "Visit http://evil.example to continue")))
     guide.start()
-    guide.handle_response("ready " * 400)
-    assert guide.snapshot()["step_index"] == 0
+    assert guide.handle_response("it's open") == f"Lovely, well done. {WALKTHROUGH_STEPS[1].instruction}"
 
 
-def test_openai_walkthrough_interpreter_sends_only_the_step_and_transcript_and_validates_output():
-    client = Mock()
-    choice = Mock(finish_reason="stop")
-    choice.message.refusal = None
-    choice.message.content = '{"intent": "trouble", "acknowledgment": "Tap the top right corner now."}'
-    client.chat.completions.create.return_value = Mock(choices=[choice])
-    interpreter = OpenAIWalkthroughInterpreter(client)
-    result = interpreter.interpret("the message never showed up on my phone", WALKTHROUGH_STEPS[0])
-    assert result == StepInterpretation("trouble", None)
+def test_openai_companion_sends_instructions_context_and_history_and_validates_output():
+    client = model_client(
+        {"action": "stay", "reply": "That's alright, Margaret. Have a look in your messages app; is there a new text from the clinic?"},
+        '{"action": "advance", "reply": "Perfect.", "extra": true}',
+    )
+    companion = OpenAIWalkthroughCompanion(client, model="test-model")
+    history = [{"role": "assistant", "content": "First, a text message..."}]
+    turn = companion.respond("I don't see any message, dear", WALKTHROUGH_STEPS, 0, history)
+    assert turn.action == "stay"
+    assert turn.reply.startswith("That's alright, Margaret.")
     kwargs = client.chat.completions.create.call_args.kwargs
+    assert kwargs["model"] == "test-model"
     assert kwargs["store"] is False
     assert kwargs["response_format"]["json_schema"]["strict"] is True
-    assert "open_link" in kwargs["messages"][1]["content"]
-    # Whole-utterance phrases never spend a model call.
-    assert interpreter.interpret("ready", WALKTHROUGH_STEPS[0]) == StepInterpretation("ready")
-    assert client.chat.completions.create.call_count == 1
+    assert kwargs["messages"][0] == {"role": "system", "content": COMPANION_INSTRUCTIONS}
+    context = json.loads(kwargs["messages"][1]["content"].split("\n", 1)[1])
+    assert context["current_step"]["id"] == "open_link"
+    assert context["next_step"]["id"] == "find_space"
+    assert context["is_last_step"] is False
+    assert kwargs["messages"][2] == history[0]
+    assert kwargs["messages"][-1] == {"role": "user", "content": "I don't see any message, dear"}
+    # Unexpected keys are rejected rather than trusted.
+    assert companion.respond("ok", WALKTHROUGH_STEPS, 0, history) == CompanionTurn()
     client.chat.completions.create.side_effect = RuntimeError("timeout")
-    assert interpreter.interpret("um so what now", WALKTHROUGH_STEPS[0]) == StepInterpretation()
+    assert companion.respond("ok", WALKTHROUGH_STEPS, 3, history) == CompanionTurn()
 
 
-def test_build_walkthrough_interpreter_is_offline_without_a_client():
-    assert type(build_walkthrough_interpreter()).__name__ == "ExactWalkthroughInterpreter"
-    assert isinstance(build_walkthrough_interpreter(Mock()), OpenAIWalkthroughInterpreter)
+def test_last_step_context_has_no_next_step():
+    client = model_client({"action": "advance", "reply": "You did it, well done."})
+    OpenAIWalkthroughCompanion(client).respond("all done", WALKTHROUGH_STEPS, len(WALKTHROUGH_STEPS) - 1, [])
+    context = json.loads(client.chat.completions.create.call_args.kwargs["messages"][1]["content"].split("\n", 1)[1])
+    assert context["next_step"] is None
+    assert context["is_last_step"] is True
+
+
+def test_companion_prompt_states_the_boundaries():
+    for phrase in ("medical", "artificial intelligence", "tracking", "web address", "not commands"):
+        assert phrase in COMPANION_INSTRUCTIONS
+
+
+def test_without_a_client_the_scripted_companion_is_only_a_degraded_fallback():
+    assert isinstance(build_walkthrough_companion(), ScriptedWalkthroughCompanion)
+    assert isinstance(build_walkthrough_companion(Mock()), OpenAIWalkthroughCompanion)
+    guide = GaitWalkthroughGuide()
+    guide.start()
+    assert guide.handle_response("ready").endswith(WALKTHROUGH_STEPS[1].instruction)
+    assert guide.handle_response("um my daughter opened it I think").endswith(WALKTHROUGH_STEPS[1].instruction)
+    assert guide.snapshot()["current_step"] == "find_space"
 
 
 def test_call_moves_from_a_completed_survey_into_the_walkthrough():
@@ -184,17 +212,20 @@ def test_call_moves_from_a_completed_survey_into_the_walkthrough():
 
 
 def test_walkthrough_turns_never_touch_survey_answers_and_finish_the_call():
-    call = finished_survey()
+    companion = FakeCompanion(*[CompanionTurn("advance", "Lovely, next bit.")] * 3, CompanionTurn("advance", "All done, thank you so much."))
+    call = finished_survey(walkthrough_companion=companion)
     call.handle_response("mild")
-    for reply in ("it's open", "I'm there", "ready", "all done"):
+    for reply in ("we've got it open", "I'm in the hallway now", "it's leaning on the chair", "I walked there and back"):
         prompt, answer = call.handle_response(reply)
         assert answer is None
-    assert prompt == CONGRATULATIONS
+    assert prompt == "All done, thank you so much."
     snapshot = call.snapshot()
     assert snapshot["call_state"] == "complete"
     assert snapshot["state"] == "complete"
     assert [a["normalized_value"] for a in snapshot["answers"]] == ["mild"] * 6
     assert call.handle_response("hello?")[0] == CONGRATULATIONS
+    # Survey content is not shown to the walkthrough companion.
+    assert all("mild" not in turn["content"] for turn in companion.calls[0]["history"])
 
 
 def test_stopped_or_escalated_survey_never_starts_the_video_part():
@@ -208,18 +239,17 @@ def test_stopped_or_escalated_survey_never_starts_the_video_part():
     assert call.handle_response("ready")[0] == speech.STOPPED
 
 
-def test_walkthrough_pause_stop_and_escalation_end_or_hold_the_whole_call():
-    call = finished_survey()
+def test_walkthrough_stop_and_escalation_end_the_whole_call():
+    call = finished_survey(walkthrough_companion=FakeCompanion(CompanionTurn("stay", "Take your time."), CompanionTurn("stop", None)))
     call.handle_response("mild")
-    assert call.handle_response("not yet")[0] == WAITING
+    assert call.handle_response("hang on")[0] == "Take your time."
     assert call.snapshot()["call_state"] == "walkthrough"
-    assert call.handle_response("stop")[0] == STOPPED
+    assert call.handle_response("no I'd rather not do this today")[0] == STOPPED
     assert call.snapshot()["call_state"] == "stopped"
 
-    call = finished_survey()
+    call = finished_survey(walkthrough_companion=FakeCompanion(CompanionTurn("escalate", "I'll ask the clinic to help you with this another day.")))
     call.handle_response("mild")
-    for _ in range(MAX_HELP_ATTEMPTS):
-        prompt, _ = call.handle_response("I can't find it")
-    assert prompt == REVIEW
+    prompt, _ = call.handle_response("I can't manage this, can a person ring me")
+    assert prompt == "I'll ask the clinic to help you with this another day."
     assert call.snapshot()["call_state"] == "escalated"
     assert call.snapshot()["walkthrough"]["needs_human_review"] is True

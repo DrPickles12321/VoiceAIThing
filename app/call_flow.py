@@ -8,7 +8,7 @@ escalated survey never continues into the video step.
 from __future__ import annotations
 
 from .gait_handoff import GaitHandoff, GaitHandoffService
-from .gait_walkthrough import GaitWalkthroughGuide, WalkthroughInterpreter
+from .gait_walkthrough import GaitWalkthroughGuide, WalkthroughCompanion
 from .models import SurveyAnswer
 from .survey_engine import SafeSurveyEngine
 
@@ -21,11 +21,11 @@ class CheckUpCall:
         repository,
         patient_code: str,
         interpreter=None,
-        walkthrough_interpreter: WalkthroughInterpreter | None = None,
+        walkthrough_companion: WalkthroughCompanion | None = None,
         handoff_service: GaitHandoffService | None = None,
     ):
         self.survey = SafeSurveyEngine(repository, patient_code, interpreter=interpreter)
-        self.walkthrough = GaitWalkthroughGuide(interpreter=walkthrough_interpreter)
+        self.walkthrough = GaitWalkthroughGuide(companion=walkthrough_companion)
         self.handoff_service = handoff_service or GaitHandoffService()
         self.handoff: GaitHandoff | None = None
         self.phase = "survey"

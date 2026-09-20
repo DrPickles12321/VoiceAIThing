@@ -14,8 +14,6 @@ The supported runtime is the safe core under `app/`:
 - `app/database.py` is the server-side Supabase REST adapter (service-role key never goes to the browser)
 - `app/voice_adapter.py` defines the voice interaction contract
 - `app/gait_handoff.py` prepares the downstream handoff payload without real delivery
-- `app/gait_walkthrough.py` guides the patient through fixed placeholder gait-video steps after the survey
-- `app/call_flow.py` composes survey then walkthrough into one `CheckUpCall`; the voice app talks to this
 
 The older `survey_intelligence/` module is retained as reference/demo code only. Do not treat it as the active implementation path.
 
@@ -34,11 +32,10 @@ and scoring only from confirmed values.
 - Stop after a bounded number of clarification retries and escalate for human review
 - Keep external integrations behind failure-tolerant wrappers
 - Separate demo behavior from production behavior
-- Walkthrough directions are application-owned; the model only classifies replies and may add a vetted encouragement
 
 ## Working rules for future changes
 
-1. Keep the runtime layered: patient lookup, survey flow, walkthrough, call flow, persistence, voice, handoff.
+1. Keep the runtime layered: patient lookup, survey flow, persistence, voice, handoff.
 2. Prefer small, reviewable slices over large monolithic rewrites.
 3. Add tests for every new guardrail or state transition.
 4. If a provider integration is added, isolate it behind a thin adapter.

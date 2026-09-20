@@ -23,9 +23,9 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from app.patient_repository import InMemoryPatientRepository
-from app.answer_interpreter import OpenAIAnswerInterpreter, build_answer_interpreter, configured_openai_client
+from app.answer_interpreter import OpenAIAnswerInterpreter, build_answer_interpreter
 from app.call_flow import CheckUpCall
-from app.gait_walkthrough import build_walkthrough_interpreter
+from app.gait_walkthrough import OpenAIWalkthroughCompanion, configured_walkthrough_companion
 from app.deepgram import DEFAULT_VOICE, stream_speech_with_deepgram, transcribe_with_deepgram
 from app import conversation_policy as speech
 from app.question_loader import QUESTION_BANKS
@@ -38,9 +38,11 @@ MAX_AUDIO_BYTES = 10 * 1024 * 1024
 def create_app(persistence=None) -> FastAPI:
     load_dotenv(ROOT / ".env")
     interpreter = build_answer_interpreter()
-    walkthrough_interpreter = build_walkthrough_interpreter(
-        configured_openai_client(), model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
-    )
+    walkthrough_companion = configured_walkthrough_companion()
+    if not isinstance(walkthrough_companion, OpenAIWalkthroughCompanion):
+        logging.getLogger(__name__).warning(
+            "No OpenAI client configured; the gait walkthrough will read its fixed script only."
+        )
     store = persistence if persistence is not None else build_persistence()
     app = FastAPI(title="VoiceAIThing desktop voice survey")
     app.state.persistence = store
@@ -105,6 +107,7 @@ def create_app(persistence=None) -> FastAPI:
         return {
             "deepgram_configured": bool(os.getenv("DEEPGRAM_API_KEY")),
             "llm_configured": isinstance(interpreter, OpenAIAnswerInterpreter),
+            "walkthrough_companion": "openai" if isinstance(walkthrough_companion, OpenAIWalkthroughCompanion) else "scripted",
             "speech_provider": "deepgram",
             "speech_model": os.getenv("DEEPGRAM_TTS_MODEL", DEFAULT_VOICE),
             "conversation_store": "supabase" if database_enabled else "in_memory",
@@ -119,7 +122,7 @@ def create_app(persistence=None) -> FastAPI:
         try:
             engine = CheckUpCall(
                 InMemoryPatientRepository(), patient_code,
-                interpreter=interpreter, walkthrough_interpreter=walkthrough_interpreter,
+                interpreter=interpreter, walkthrough_companion=walkthrough_companion,
             )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

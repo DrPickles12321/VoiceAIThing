@@ -17,16 +17,8 @@ hard tough been dealing going through hear explaining understood got
 to really helps clearing up
 """.split())
 
-# The walkthrough may encourage effort; it still may not describe the screen,
-# the recording, the patient's body or health, or give any instruction.
-ENCOURAGEMENT_WORDS = BRIDGE_WORDS | frozenset("""wonderful lovely great well done doing nicely perfect
-no rush hurry there's whenever you you're ready right here staying together
-step by one thing worry all fine alright good job nearly almost there we've
-we'll made carry on happens can be fiddly tricky these things again try
-""".split())
 
-
-def validated_bridge(value: object, vocabulary: frozenset[str] = BRIDGE_WORDS) -> str | None:
+def validated_bridge(value: object) -> str | None:
     if not isinstance(value, str):
         return None
     text = value.strip().replace("’", "'")
@@ -35,6 +27,6 @@ def validated_bridge(value: object, vocabulary: frozenset[str] = BRIDGE_WORDS) -
     if not text or len(text) > 120 or not re.fullmatch(r"[A-Za-z' ,]+\.?", text):
         return None
     words = re.findall(r"[a-z]+(?:'[a-z]+)?", text.casefold())
-    if not 1 <= len(words) <= 18 or not set(words) <= vocabulary:
+    if not 1 <= len(words) <= 18 or not set(words) <= BRIDGE_WORDS:
         return None
     return text.rstrip(".") + "."

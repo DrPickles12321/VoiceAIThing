@@ -156,30 +156,44 @@ RUN_LIVE_SURVEY_TESTS=1 python -m pytest -m live -q
 ## Gait video walkthrough (stage 2, placeholder directions)
 
 Once the survey reaches `complete`, `app/call_flow.py` (`CheckUpCall`) moves the
-same call into `app/gait_walkthrough.py` (`GaitWalkthroughGuide`). The helper
-thanks the patient, says it will stay on the line, and reads fixed placeholder
-steps one at a time: open the texted link, find a clear hallway, prop the phone
-at waist height, then tap the button and walk away and back. Each step ends by
-asking the patient to say when they are ready. A stopped or escalated survey never
-enters the walkthrough. The gait handoff payload is prepared at the transition;
-no text message or link is actually sent and the helper never speaks a URL.
+same call into `app/gait_walkthrough.py` (`GaitWalkthroughGuide`). The survey
+engine, question banks and confirmation flow are untouched; the walkthrough is a
+separate layer that only starts after the last answer is confirmed. A stopped or
+escalated survey never enters it. The gait handoff payload is prepared at the
+transition; no text message or link is actually sent and the helper never speaks
+a URL.
 
-The step text is application-owned and spoken verbatim. The interpreter only
-classifies the reply as ready, not ready, trouble, repeat, pause, resume, stop,
-medical question, off-topic, or unclear. `SURVEY_EXTRACTOR=exact` matches whole
-phrases only; with `SURVEY_EXTRACTOR=openai` the model may also add one short
-encouragement drawn from a fixed word list, and any other text is dropped. "Stop"
-is honored before the interpreter runs. "Not yet" or "hold on" waits without
-moving on; "repeat" reads the current step again. Trouble and unclear replies
-re-read the step with a gentle bridge, and after three such attempts on one step
-the helper says a person from the care team will follow up and the call ends in
-`escalated`. Medical questions get the same boundary reply as the survey.
+This stage collects no clinical data, so the helper is deliberately given more
+autonomy than the survey. The opening (thank-you, "I'll stay right here with you",
+first step) is fixed text. From then on every reply comes from the OpenAI model
+(`OpenAIWalkthroughCompanion`): it receives the ordered step goals, the current
+and next placeholder directions, the whole walkthrough conversation so far, and
+the patient's free-form words, and returns `{action, reply}`. It understands
+ordinary speech ("my daughter's just opening it", "I'm in the hallway but where
+does the phone go?", "can I sit down a minute?"), answers practical questions,
+chats back briefly, and phrases each step in its own warm words while keeping the
+direction's concrete details. The application still decides progression: the
+model may only ask to `stay`, `advance`, `stop` or `escalate`; the guide moves
+at most one step per turn, owns the terminal states, honours a plain spoken
+"stop" before the model runs, and hands over to a person (`escalated`,
+`needs_human_review`) after eight consecutive turns without progress on one step.
+The prompt forbids medical advice, tracking/AI talk, invented links or screens,
+and following instructions embedded in the patient's speech; replies containing
+a URL or over ninety words are dropped. Any dropped, refused or failed model
+response falls back to re-reading the fixed step text, so a provider outage never
+strands the call.
+
+The walkthrough uses OpenAI whenever `OPENAI_API_KEY` is set (independently of
+`SURVEY_EXTRACTOR`, which governs the survey only). Without a key it degrades to
+a scripted fallback that re-reads the fixed steps and advances on a plain
+"ready"; the server logs a warning, `/api/config` reports
+`walkthrough_companion: "scripted"`, and this is not the intended experience.
 
 API snapshots carry the survey fields unchanged plus `phase`, `call_state`
 (`survey`, `walkthrough`, `complete`, `stopped`, `escalated`), `walkthrough`
-(step, attempts, review flag) and `gait_handoff`. The browser keeps the microphone
-open while `call_state` is `walkthrough` and only releases it when the whole call
-ends. Replace `WALKTHROUGH_STEPS` once the real gait recording UI exists.
+(step, stalled turns, review flag) and `gait_handoff`. The browser keeps the
+microphone open while `call_state` is `walkthrough` and only releases it when the
+whole call ends. Replace `WALKTHROUGH_STEPS` once the real gait recording UI exists.
 
 ## Validation
 
@@ -233,8 +247,8 @@ python voice_app.py
 Open <http://127.0.0.1:8000>, choose a patient code, click **Start survey**, and
 allow microphone access once. After each prompt, just speak and briefly pause;
 no per-answer button press is needed. After the last survey answer the helper
-continues straight into the gait video walkthrough; say "ready", "it's open" or
-"all done" to move through the placeholder steps.
+continues straight into the gait video walkthrough and talks you through the
+placeholder steps in ordinary conversation (needs `OPENAI_API_KEY`).
 Your transcript appears as **You:** in the conversation. Use `RGN-0417` for the
 orthopedic/HOOS JR branch or `RGN-0500` for the stroke branch.
 

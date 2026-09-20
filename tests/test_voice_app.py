@@ -1,6 +1,7 @@
 from app.patient_repository import InMemoryPatientRepository
 from app.survey_engine import SafeSurveyEngine
 from app.answer_interpreter import Interpretation
+from app.gait_walkthrough import CompanionTurn
 from app.persistence import InMemoryPersistence
 from fastapi.testclient import TestClient
 import voice_app
@@ -224,8 +225,30 @@ def test_audio_route_keeps_the_call_open_through_the_video_walkthrough(monkeypat
     store = InMemoryPersistence()
     monkeypatch.setenv("DEEPGRAM_API_KEY", "synthetic-test-key")
     monkeypatch.setenv("SURVEY_EXTRACTOR", "exact")
-    transcripts = iter(["mild"] * 6 + ["it's open", "help", "I'm there", "ready", "all done"])
+    transcripts = iter(["mild"] * 6 + [
+        "my daughter has just got it open on her phone",
+        "the hallway's a bit dark, is the kitchen alright?",
+        "right, I'm in the kitchen now",
+        "it's propped up on the chair",
+        "there and back, all done",
+    ])
     monkeypatch.setattr(voice_app, "transcribe_with_deepgram", lambda *args: next(transcripts))
+
+    class ModelStandIn:
+        """What the OpenAI companion would return for the replies above."""
+
+        turns = iter([
+            CompanionTurn("advance", "Lovely, well done both of you. Now, is there a hallway or a clear stretch of floor nearby where you could take about ten steps in a straight line? Tell me when you're there."),
+            CompanionTurn("stay", "The kitchen is fine, as long as it's nice and bright and there's room for about ten steps. Let me know when you're there."),
+            CompanionTurn("advance", "Perfect. Next, the phone needs to see all of you. If your daughter can hold it, wonderful; otherwise lean it on something steady at about waist height, a few steps in front of you."),
+            CompanionTurn("advance", "Great. When you're ready, tap the big button to start recording, walk away from the phone at your normal pace, turn around and walk back. Tell me when you've finished."),
+            CompanionTurn("advance", None),
+        ])
+
+        def respond(self, transcript, steps, step_index, history):
+            return next(self.turns)
+
+    monkeypatch.setattr(voice_app, "configured_walkthrough_companion", ModelStandIn)
     with TestClient(create_app(persistence=store)) as client:
         started = client.post("/api/sessions", params={"patient_code": "RGN-0417"}).json()
         assert started["call_state"] == "survey"
@@ -242,9 +265,11 @@ def test_audio_route_keeps_the_call_open_through_the_video_walkthrough(monkeypat
         assert "http" not in finished_survey["prompt"]
         opened = client.post(url, files=files).json()
         assert opened["walkthrough"]["current_step"] == "find_space"
-        stuck = client.post(url, files=files).json()
-        assert stuck["walkthrough"] == {**opened["walkthrough"], "help_attempts": 1}
-        assert len(stuck["answers"]) == 6
+        assert opened["prompt"].startswith("Lovely, well done both of you.")
+        asked = client.post(url, files=files).json()
+        assert asked["walkthrough"] == {**opened["walkthrough"], "stalled_turns": 1}
+        assert asked["prompt"].startswith("The kitchen is fine")
+        assert len(asked["answers"]) == 6
         client.post(url, files=files)
         client.post(url, files=files)
         done = client.post(url, files=files).json()
@@ -254,5 +279,5 @@ def test_audio_route_keeps_the_call_open_through_the_video_walkthrough(monkeypat
     assert len(results) == 1
     assert results[0]["status"] == "completed"
     assert results[0]["transcript"].count("patient: mild") == 6
-    assert "patient: all done" in results[0]["transcript"]
+    assert "patient: there and back, all done" in results[0]["transcript"]
     assert len(results[0]["survey_results"]) == 6
