@@ -3,7 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from .conversation_policy import COMPLETE, INTRO
+from .conversation_policy import (
+    COMPLETE,
+    INTRO,
+    LINK_SENT,
+    WALKTHROUGH_CLOSING,
+    WALKTHROUGH_COUNTDOWN,
+    WALKTHROUGH_GUIDANCE,
+)
 
 
 @dataclass(frozen=True)
@@ -36,6 +43,22 @@ class VoiceAdapter:
 
     def closing_script(self) -> VoiceTurn:
         return VoiceTurn("assistant", self.tts(COMPLETE))
+
+    def link_sent_confirmation(self) -> VoiceTurn:
+        """Spoken right after the gait-checker link is texted (or logged as a fallback)."""
+        return VoiceTurn("assistant", self.tts(LINK_SENT))
+
+    def walkthrough_guidance(self) -> VoiceTurn:
+        """Live, step-by-step camera setup guidance -- fixed script, not model-generated."""
+        return VoiceTurn("assistant", self.tts(WALKTHROUGH_GUIDANCE))
+
+    def walkthrough_countdown(self) -> VoiceTurn:
+        return VoiceTurn("assistant", self.tts(WALKTHROUGH_COUNTDOWN))
+
+    def walkthrough_closing(self) -> VoiceTurn:
+        """Warm, generic closing regardless of what happened during the walk -- the voice
+        side has no visibility into the gait checker's own camera feed."""
+        return VoiceTurn("assistant", self.tts(WALKTHROUGH_CLOSING))
 
     def normalize_input(self, transcript: str) -> str:
         return self.stt(transcript).strip()

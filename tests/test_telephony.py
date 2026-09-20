@@ -192,8 +192,82 @@ def test_call_session_completes_and_prepares_handoff():
     asyncio.run(scenario())
     assert session.finished
     assert session.handoff is not None
-    assert "survey is complete" in spoken[-1]
+    assert any("survey is complete" in line for line in spoken)
     assert session.persistence.calls["sess-1"].final_status == "complete"
+
+
+def test_call_session_texts_the_gait_link_and_walks_through_setup():
+    sent: list[tuple[str, str]] = []
+
+    async def sms_sender(to_number: str, body: str) -> None:
+        sent.append((to_number, body))
+
+    engine = SafeSurveyEngine(InMemoryPatientRepository(), "RGN-0417")
+    spoken: list[str] = []
+
+    async def speak(text: str) -> None:
+        spoken.append(text)
+
+    session = PhoneCallSession(
+        engine,
+        speak,
+        session_id="sess-2",
+        to_number="+14155550123",
+        sms_sender=sms_sender,
+    )
+
+    async def scenario() -> None:
+        await session.begin()
+        for _ in range(len(session.engine.session.questions)):
+            session.add_transcript("none")
+            await session.flush_utterance()
+
+    asyncio.run(scenario())
+
+    assert session.finished
+    assert session.handoff is not None
+    assert session.handoff.sms_sent is True
+    assert sent == [("+14155550123", session.handoff.link)]
+
+    closing_index = max(i for i, line in enumerate(spoken) if "survey is complete" in line)
+    tail = spoken[closing_index + 1 :]
+    assert "texted you a secure link" in tail[0]
+    assert "Live Camera" in tail[1]
+    assert "count to three" in tail[2]
+    assert tail[3] == "Great, thank you! Take care."
+
+
+def test_call_session_still_completes_when_sms_sending_fails():
+    async def failing_sms_sender(to_number: str, body: str) -> None:
+        raise RuntimeError("Twilio is down")
+
+    engine = SafeSurveyEngine(InMemoryPatientRepository(), "RGN-0417")
+    spoken: list[str] = []
+
+    async def speak(text: str) -> None:
+        spoken.append(text)
+
+    session = PhoneCallSession(
+        engine,
+        speak,
+        session_id="sess-3",
+        to_number="+14155550123",
+        sms_sender=failing_sms_sender,
+    )
+
+    async def scenario() -> None:
+        await session.begin()
+        for _ in range(len(session.engine.session.questions)):
+            session.add_transcript("none")
+            await session.flush_utterance()
+
+    asyncio.run(scenario())
+
+    assert session.finished
+    assert session.handoff is not None
+    assert session.handoff.sms_sent is False
+    assert spoken[-1] == "Great, thank you! Take care."
+    assert session.persistence.calls["sess-3"].final_status == "complete"
 
 
 def test_speech_chunks_split_long_prompts_into_sentence_groups():

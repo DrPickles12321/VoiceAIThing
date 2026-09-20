@@ -160,6 +160,19 @@ INTRO = (
     "You can ask me to repeat, pause, or stop at any time."
 )
 COMPLETE = "Thank you for sharing your answers with me. The survey is complete."
+LINK_SENT = (
+    "I’ve just texted you a secure link. Go ahead and open it on your phone or computer "
+    "whenever you’re ready."
+)
+WALKTHROUGH_GUIDANCE = (
+    "Tap the “Live Camera” mode, prop your device up against a stable surface where your "
+    "full body is visible, and step back a few paces."
+)
+WALKTHROUGH_COUNTDOWN = (
+    "When you’re ready, I’ll count to three, and you can walk slowly across the frame "
+    "from left to right. One. Two. Three. Go ahead."
+)
+WALKTHROUGH_CLOSING = "Great, thank you! Take care."
 STOPPED = "Of course. We’ll stop here. Thank you for your time."
 PAUSED = "Of course. Take your time. Say ‘resume’ when you’re ready, or ‘stop’ to finish."
 REVIEW = (

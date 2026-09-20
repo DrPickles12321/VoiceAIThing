@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from typing import Awaitable, Callable
 
@@ -9,9 +10,12 @@ from ..persistence import InMemoryPersistence
 from ..survey_engine import SafeSurveyEngine
 from ..voice_adapter import VoiceAdapter
 
+logger = logging.getLogger(__name__)
+
 TERMINAL_STATES = {"complete", "escalated"}
 
 Speaker = Callable[[str], Awaitable[None]]
+SmsSender = Callable[[str, str], Awaitable[None]]
 
 
 class PhoneCallSession:
@@ -31,6 +35,8 @@ class PhoneCallSession:
         voice: VoiceAdapter | None = None,
         handoff_service: GaitHandoffService | None = None,
         max_silent_reprompts: int = 2,
+        to_number: str | None = None,
+        sms_sender: SmsSender | None = None,
     ):
         self.engine = engine
         self.speak = speak
@@ -39,6 +45,8 @@ class PhoneCallSession:
         self.voice = voice or VoiceAdapter()
         self.handoff_service = handoff_service or GaitHandoffService()
         self.max_silent_reprompts = max_silent_reprompts
+        self.to_number = to_number
+        self.sms_sender = sms_sender
         self.handoff: GaitHandoff | None = None
         self._buffer: list[str] = []
         self._last_prompt = ""
@@ -113,8 +121,32 @@ class PhoneCallSession:
                 self.engine.patient.patient_code,
                 self.engine.patient.condition_category.value,
             )
+            await self._send_gait_handoff()
         self.persistence.complete_call(self.session_id, self.engine.session.state)
         return True
+
+    async def _send_gait_handoff(self) -> None:
+        """Text the gait-checker link, then stay on the line and walk the caller
+        into position for it, rather than reading a link and hanging up.
+
+        A failed text does not stop the call from completing or the walkthrough
+        from playing -- the patient still hears the guidance either way, and a
+        failed send is recorded on ``self.handoff`` for follow-up.
+        """
+
+        assert self.handoff is not None
+        if self.sms_sender and self.to_number and self.handoff.link:
+            try:
+                await self.sms_sender(self.to_number, self.handoff.link)
+                self.handoff.sms_sent = True
+            except Exception:
+                logger.exception(
+                    "Could not text the gait-checker link for session %s", self.session_id
+                )
+        await self._say(self.voice.link_sent_confirmation().text)
+        await self._say(self.voice.walkthrough_guidance().text)
+        await self._say(self.voice.walkthrough_countdown().text)
+        await self._say(self.voice.walkthrough_closing().text)
 
     async def _say(self, text: str) -> None:
         self._last_prompt = text

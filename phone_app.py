@@ -13,7 +13,7 @@ import base64
 import json
 import logging
 import re
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -38,6 +38,7 @@ from app.telephony.call_session import PhoneCallSession
 from app.telephony.config import TelephonyConfigurationError, TelephonySettings, load_settings
 from app.telephony.deepgram_stt import DeepgramTranscriber
 from app.telephony.deepgram_tts import frames, synthesize_mulaw_async
+from app.telephony.sms import send_sms_async
 
 ROOT = Path(__file__).resolve().parent
 VOICE_PATH = "/twilio/voice"
@@ -73,12 +74,14 @@ class MediaStreamBridge:
         persistence: InMemoryPersistence,
         transcriber_factory=None,
         interpreter: AnswerInterpreter | None = None,
+        sms_sender: Callable[[str, str], Awaitable[None]] | None = None,
     ):
         self.websocket = websocket
         self.settings = settings
         self.repository = repository
         self.persistence = persistence
         self.interpreter = interpreter
+        self.sms_sender = sms_sender
         self.transcriber_factory = transcriber_factory or DeepgramTranscriber
         self.stream_sid: str | None = None
         self.session: PhoneCallSession | None = None
@@ -146,11 +149,15 @@ class MediaStreamBridge:
             await self._close()
             return
 
+        record = self.persistence.calls.get(session_id)
+        to_number = record.to_number if record else None
         self.session = PhoneCallSession(
             engine,
             speak=self._speak,
             session_id=session_id,
             persistence=self.persistence,
+            to_number=to_number,
+            sms_sender=self.sms_sender,
         )
         self.transcriber = self.transcriber_factory(
             api_key=self.settings.deepgram_api_key or "",
@@ -411,6 +418,15 @@ def create_app(settings: TelephonySettings | None = None) -> FastAPI:
     persistence = InMemoryPersistence()
     interpreter = build_answer_interpreter()
     sessions_by_call_sid: dict[str, str] = {}
+
+    async def sms_sender(to_number: str, body: str) -> None:
+        await send_sms_async(
+            account_sid=resolved.twilio_account_sid,
+            auth_token=resolved.twilio_auth_token,
+            to_number=to_number,
+            from_number=resolved.twilio_from_number,
+            body=body,
+        )
     app.state.settings = resolved
     app.state.persistence = persistence
 
@@ -527,7 +543,12 @@ def create_app(settings: TelephonySettings | None = None) -> FastAPI:
     @app.websocket(MEDIA_PATH)
     async def media(websocket: WebSocket) -> None:
         await MediaStreamBridge(
-            websocket, resolved, repository, persistence, interpreter=interpreter
+            websocket,
+            resolved,
+            repository,
+            persistence,
+            interpreter=interpreter,
+            sms_sender=sms_sender,
         ).run()
 
     @app.get("/")
