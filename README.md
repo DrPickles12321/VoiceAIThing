@@ -246,17 +246,24 @@ orthopedic/HOOS JR branch or `RGN-0500` for the stroke branch.
 
 This is a local turn-based desktop demo, not a phone system. It does not yet
 stream microphone audio continuously to Deepgram, support interrupting the helper
-by speaking, send a real gait link, or persist to a remote database.
+by speaking, or send a real gait link.
+
+When `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set on the server, each
+voice session stores the synthetic patient id, the conversation transcript
+text, and confirmed survey results. Raw audio is not stored. Inspect saved
+rows at `GET /api/results` or the `patient_conversation_results` view. See
+[DATABASE.md](DATABASE.md).
 
 The active survey implementation is in `app/`; this checkout does not include
 the earlier `survey_intelligence/` prototype.
 
 ## Database / Supabase (additive, optional)
 
-The voice app still defaults to in-memory patient lookup and persistence.
-An optional Postgres/Supabase schema was added for longitudinal survey
-storage, confirmed-value scoring, a clinician dashboard view, and an
-answer-audit view.
+The voice app looks up patients in memory. When Supabase server credentials are
+set, it also stores each conversation's synthetic patient id, transcript text,
+and confirmed survey results. An optional Postgres/Supabase schema supports
+longitudinal storage, confirmed-value scoring, a clinician dashboard view, and
+an answer-audit view.
 
 This layer is **synthetic/demo data only** and is **not HIPAA compliant**.
 It does not store raw audio. Scoring uses confirmed answers only, never AI

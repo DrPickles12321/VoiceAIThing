@@ -28,15 +28,18 @@ from app.survey_engine import SafeSurveyEngine
 from app.deepgram import DEFAULT_VOICE, stream_speech_with_deepgram, transcribe_with_deepgram
 from app import conversation_policy as speech
 from app.question_loader import QUESTION_BANKS
+from app.persistence import CompositePersistence, build_persistence
 
 ROOT = Path(__file__).resolve().parent
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
 
 
-def create_app() -> FastAPI:
+def create_app(persistence=None) -> FastAPI:
     load_dotenv(ROOT / ".env")
     interpreter = build_answer_interpreter()
+    store = persistence if persistence is not None else build_persistence()
     app = FastAPI(title="VoiceAIThing desktop voice survey")
+    app.state.persistence = store
     sessions: dict[str, SafeSurveyEngine] = {}
     session_locks: dict[str, RLock] = {}
     # Only the current application-produced prompt can be synthesized. The
@@ -84,14 +87,28 @@ def create_app() -> FastAPI:
             speech_turns[session_id] = {"prompt_id": prompt_id, "text": prompt}
         return {"prompt": prompt, "prompt_id": prompt_id}
 
+    def persist(action, *args) -> None:
+        try:
+            action(*args)
+        except Exception:
+            logging.getLogger(__name__).exception("Conversation persistence failed")
+
     @app.get("/api/config")
     def config() -> dict[str, object]:
+        database_enabled = isinstance(store, CompositePersistence) or (
+            store is not None and store.__class__.__name__ == "DatabaseConversationStore"
+        )
         return {
             "deepgram_configured": bool(os.getenv("DEEPGRAM_API_KEY")),
             "llm_configured": isinstance(interpreter, OpenAIAnswerInterpreter),
             "speech_provider": "deepgram",
             "speech_model": os.getenv("DEEPGRAM_TTS_MODEL", DEFAULT_VOICE),
+            "conversation_store": "supabase" if database_enabled else "in_memory",
         }
+
+    @app.get("/api/results")
+    def results(patient_code: str | None = None) -> dict[str, object]:
+        return {"results": store.list_results(patient_code)}
 
     @app.post("/api/sessions")
     def create_session(patient_code: str = "RGN-0417") -> dict[str, object]:
@@ -100,12 +117,14 @@ def create_app() -> FastAPI:
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         session_id = str(uuid4())
+        prompt = engine.start()
         with lock:
             sessions[session_id] = engine
             session_locks[session_id] = RLock()
+        persist(store.persist_session_start, session_id, engine.patient, prompt)
         return {
             "session_id": session_id,
-            **speech_turn(session_id, engine.start()),
+            **speech_turn(session_id, prompt),
             **engine.snapshot(),
         }
 
@@ -127,6 +146,7 @@ def create_app() -> FastAPI:
             with session_locks[session_id]:
                 transcript = transcribe_with_deepgram(content, audio.content_type or "audio/webm")
                 prompt, answer = engine.handle_response(transcript)
+                persist(store.persist_turn, session_id, transcript, prompt, answer, engine.snapshot())
                 return {
                     "transcript": transcript,
                     **speech_turn(session_id, prompt),
