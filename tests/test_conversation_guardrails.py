@@ -142,7 +142,7 @@ def test_untrusted_adapter_output_cannot_change_speech_or_save_an_answer(result)
     engine = make_engine(StubInterpreter(result))
     question = engine.session.current_question
     prompt, answer = engine.handle_response("mild or unbearable, I can't decide")
-    assert prompt == speech.clarification_text(question)
+    assert prompt == speech.clarification_text(question, include_options=False)
     assert answer is None
     assert engine.session.pending_answer is None
     assert engine.session.answers == []
@@ -309,3 +309,13 @@ def test_conversational_correction_still_requires_a_new_confirmation():
     assert engine.session.answers == []
     engine.handle_response("yes")
     assert engine.session.answers[0].normalized_value == "moderate"
+
+
+def test_the_answer_scale_is_not_read_out_on_every_stumble():
+    engine = make_engine()
+
+    first, _ = engine.handle_response("mild or unbearable, I can't decide")
+    second, _ = engine.handle_response("mild or unbearable, I can't decide")
+
+    assert "The choices are" not in first
+    assert "The choices are" in second

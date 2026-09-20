@@ -190,6 +190,7 @@ def confirmation_text(question, value: str, acknowledgment=None, *, correction=F
     )
 
 
-def clarification_text(question, acknowledgment=None) -> str:
+def clarification_text(question, acknowledgment=None, *, include_options: bool = True) -> str:
     bridge = validated_bridge(acknowledgment) or "Take your time."
-    return f"{bridge} {question.prompt} {options_text(question)} Which fits your experience best?"
+    options = f" {options_text(question)}" if include_options else ""
+    return f"{bridge} {question.prompt}{options} Which fits your experience best?"
