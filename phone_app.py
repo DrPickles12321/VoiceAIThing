@@ -250,7 +250,7 @@ def create_app(settings: TelephonySettings | None = None) -> FastAPI:
         except TelephonyConfigurationError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         try:
-            repository.lookup_patient(payload.patient_code)
+            patient = repository.lookup_patient(payload.patient_code)
         except PatientNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -272,6 +272,11 @@ def create_app(settings: TelephonySettings | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except twilio.TwilioError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        record = persistence.start_call(
+            session_id, payload.patient_code, patient.condition_category.value
+        )
+        record.status = "dialing"
         return {
             "call_sid": call.call_sid,
             "status": call.status,

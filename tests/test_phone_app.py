@@ -81,6 +81,24 @@ def test_voice_webhook_hangs_up_on_unknown_patient(client):
     assert "Stream" not in response.text
 
 
+def test_start_call_records_dialing_before_twilio_connects(client, monkeypatch):
+    async def fake_place_call(**kwargs):
+        return phone_app.twilio.PlacedCall(
+            call_sid="CA1", status="queued", to_number=kwargs["to_number"]
+        )
+
+    monkeypatch.setattr(phone_app.twilio, "place_call_async", fake_place_call)
+    response = client.post(
+        "/api/calls", json={"to_number": "+14155550123", "patient_code": "RGN-0417"}
+    )
+    assert response.status_code == 200
+    session_id = response.json()["session_id"]
+
+    record = client.get(f"/api/calls/{session_id}").json()
+    assert record["status"] == "dialing"
+    assert record["patient_code"] == "RGN-0417"
+
+
 def test_start_call_rejects_unknown_patient(client):
     response = client.post("/api/calls", json={"to_number": "+14155550123", "patient_code": "NOPE"})
     assert response.status_code == 404
