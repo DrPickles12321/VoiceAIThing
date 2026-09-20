@@ -71,12 +71,14 @@ class MediaStreamBridge:
         self._silence_task: asyncio.Task[None] | None = None
         self._mark_counter = 0
         self._last_mark: str | None = None
+        self._closed = False
+        self._inbound_frames = 0
 
     async def run(self) -> None:
         await self.websocket.accept()
         events_task: asyncio.Task[None] | None = None
         try:
-            while True:
+            while not self._closed:
                 message = json.loads(await self.websocket.receive_text())
                 event = message.get("event")
                 if event == "start":
@@ -86,6 +88,7 @@ class MediaStreamBridge:
                 elif event == "mark":
                     await self._on_mark(message)
                 elif event == "stop":
+                    logger.info("Stream %s stopped by Twilio", self.stream_sid)
                     break
         except WebSocketDisconnect:
             pass
@@ -105,6 +108,13 @@ class MediaStreamBridge:
         parameters = start.get("customParameters", {}) or {}
         patient_code = parameters.get("patientCode", "")
         session_id = parameters.get("sessionId") or start.get("callSid") or str(uuid4())
+        logger.info(
+            "Stream %s started for call %s (patient %s, format %s)",
+            self.stream_sid,
+            start.get("callSid"),
+            patient_code,
+            start.get("mediaFormat"),
+        )
         try:
             engine = SafeSurveyEngine(self.repository, patient_code)
         except PatientNotFoundError:
@@ -136,10 +146,16 @@ class MediaStreamBridge:
             return
         payload = media.get("payload")
         if payload:
+            self._inbound_frames += 1
+            if self._inbound_frames % 250 == 0:
+                logger.info(
+                    "Stream %s received %d inbound frames", self.stream_sid, self._inbound_frames
+                )
             await self.transcriber.send_audio(base64.b64decode(payload))
 
     async def _on_mark(self, message: dict[str, Any]) -> None:
         name = message.get("mark", {}).get("name")
+        logger.info("Stream %s finished playing %s", self.stream_sid, name)
         if name == self.hangup_mark:
             await self._close()
             return
@@ -165,9 +181,17 @@ class MediaStreamBridge:
 
     async def _speak(self, text: str) -> None:
         if not self.settings.deepgram_api_key or self.stream_sid is None:
+            logger.warning("Cannot speak: deepgram key or stream missing")
             return
         audio = await synthesize_mulaw_async(
             text, self.settings.deepgram_api_key, self.settings.tts_model
+        )
+        logger.info(
+            "Speaking %d chars as %d bytes (%.1fs) on stream %s",
+            len(text),
+            len(audio),
+            len(audio) / 8000,
+            self.stream_sid,
         )
         self._cancel_silence_timer()
         self.bot_speaking = True
@@ -220,9 +244,10 @@ class MediaStreamBridge:
             await self.websocket.send_text(json.dumps(message))
 
     async def _close(self) -> None:
+        self._closed = True
         try:
             await self.websocket.close()
-        except RuntimeError:
+        except (RuntimeError, WebSocketDisconnect):
             pass
 
 
@@ -371,5 +396,7 @@ def _signature_ok(settings: TelephonySettings, request: Request, form: dict[str,
 
 if __name__ == "__main__":
     import uvicorn
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s %(message)s")
 
     uvicorn.run(create_app(), host="0.0.0.0", port=8000)
