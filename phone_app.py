@@ -12,6 +12,8 @@ import asyncio
 import base64
 import json
 import logging
+import re
+from collections.abc import Awaitable
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -36,6 +38,9 @@ VOICE_PATH = "/twilio/voice"
 STATUS_PATH = "/twilio/status"
 MEDIA_PATH = "/twilio/media"
 SILENCE_TIMEOUT_SECONDS = 8.0
+FRAME_SECONDS = 0.02
+PLAYBACK_LEAD_SECONDS = 2.0
+SPEECH_CHUNK_CHARS = 90
 CARRIER_FAILURES = {"busy", "no-answer", "failed", "canceled"}
 
 logger = logging.getLogger("phone_app")
@@ -73,16 +78,18 @@ class MediaStreamBridge:
         self._last_mark: str | None = None
         self._closed = False
         self._inbound_frames = 0
+        self._turn_lock = asyncio.Lock()
+        self._tasks: list[asyncio.Task[None]] = []
+        self._playback_task: asyncio.Task[None] | None = None
 
     async def run(self) -> None:
         await self.websocket.accept()
-        events_task: asyncio.Task[None] | None = None
         try:
             while not self._closed:
                 message = json.loads(await self.websocket.receive_text())
                 event = message.get("event")
                 if event == "start":
-                    events_task = await self._on_start(message)
+                    await self._on_start(message)
                 elif event == "media":
                     await self._on_media(message)
                 elif event == "mark":
@@ -96,13 +103,13 @@ class MediaStreamBridge:
             logger.exception("Media stream failed")
         finally:
             self._cancel_silence_timer()
-            if events_task is not None:
-                events_task.cancel()
+            for task in self._tasks:
+                task.cancel()
             if self.transcriber is not None:
                 await self.transcriber.close()
             await self._close()
 
-    async def _on_start(self, message: dict[str, Any]) -> asyncio.Task[None] | None:
+    async def _on_start(self, message: dict[str, Any]) -> None:
         start = message.get("start", {})
         self.stream_sid = start.get("streamSid") or message.get("streamSid")
         parameters = start.get("customParameters", {}) or {}
@@ -120,7 +127,7 @@ class MediaStreamBridge:
         except PatientNotFoundError:
             logger.error("Unknown patient code on call %s", session_id)
             await self._close()
-            return None
+            return
 
         self.session = PhoneCallSession(
             engine,
@@ -134,9 +141,10 @@ class MediaStreamBridge:
             utterance_end_ms=self.settings.utterance_end_ms,
         )
         await self.transcriber.__aenter__()
-        task = asyncio.create_task(self._pump_speech_events())
-        await self.session.begin()
-        return task
+        # Both the survey turns and the speech events run off the receive loop so
+        # inbound audio keeps flowing to Deepgram while a prompt is playing.
+        self._tasks.append(asyncio.create_task(self._pump_speech_events()))
+        self._tasks.append(asyncio.create_task(self._run_turn(self.session.begin())))
 
     async def _on_media(self, message: dict[str, Any]) -> None:
         if self.transcriber is None:
@@ -162,6 +170,19 @@ class MediaStreamBridge:
         self.bot_speaking = False
         self._start_silence_timer()
 
+    async def _run_turn(self, coroutine: Awaitable[bool | None]) -> None:
+        """Serialize survey turns; one prompt finishes speaking before the next."""
+
+        try:
+            async with self._turn_lock:
+                finished = await coroutine
+            if finished:
+                await self._end_after_playback()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Survey turn failed")
+
     async def _pump_speech_events(self) -> None:
         assert self.transcriber is not None
         async for event in self.transcriber.events():
@@ -175,42 +196,75 @@ class MediaStreamBridge:
                 self._cancel_silence_timer()
                 self.session.add_transcript(event.text)
             elif event.kind == "utterance_end":
-                finished = await self.session.flush_utterance()
-                if finished:
-                    await self._end_after_playback()
+                await self._run_turn(self.session.flush_utterance())
 
     async def _speak(self, text: str) -> None:
         if not self.settings.deepgram_api_key or self.stream_sid is None:
             logger.warning("Cannot speak: deepgram key or stream missing")
             return
-        audio = await synthesize_mulaw_async(
-            text, self.settings.deepgram_api_key, self.settings.tts_model
-        )
-        logger.info(
-            "Speaking %d chars as %d bytes (%.1fs) on stream %s",
-            len(text),
-            len(audio),
-            len(audio) / 8000,
-            self.stream_sid,
-        )
         self._cancel_silence_timer()
         self.bot_speaking = True
-        for frame in frames(audio):
-            await self._send(
-                {
-                    "event": "media",
-                    "streamSid": self.stream_sid,
-                    "media": {"payload": base64.b64encode(frame).decode("ascii")},
-                }
-            )
         self._mark_counter += 1
         self._last_mark = f"prompt-{self._mark_counter}"
-        await self._send(
-            {"event": "mark", "streamSid": self.stream_sid, "mark": {"name": self._last_mark}}
+        playback = asyncio.create_task(self._stream_speech(text, self._last_mark))
+        self._playback_task = playback
+        # Waiting this way keeps a barge-in cancellation local to the playback.
+        await asyncio.wait({playback})
+
+    async def _stream_speech(self, text: str, mark: str) -> None:
+        """Synthesize the prompt piece by piece and play it at speaking speed.
+
+        A whole prompt takes seconds to synthesize, which the caller would hear
+        as dead air, so each sentence group is rendered while the previous one
+        plays. Frames go out just ahead of playback: Twilio buffers everything
+        it receives, so a burst would both make barge-in meaningless and starve
+        the inbound audio Deepgram expects.
+        """
+
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        sent_frames = 0
+        chunks = speech_chunks(text)
+        pending = asyncio.create_task(self._synthesize(chunks[0]))
+        for index, chunk in enumerate(chunks):
+            audio = await pending
+            if index + 1 < len(chunks):
+                pending = asyncio.create_task(self._synthesize(chunks[index + 1]))
+            logger.info(
+                "Speaking %d chars as %.1fs of audio on stream %s",
+                len(chunk),
+                len(audio) / 8000,
+                self.stream_sid,
+            )
+            for frame in frames(audio):
+                await self._send(
+                    {
+                        "event": "media",
+                        "streamSid": self.stream_sid,
+                        "media": {"payload": base64.b64encode(frame).decode("ascii")},
+                    }
+                )
+                sent_frames += 1
+                ahead = (
+                    started
+                    + sent_frames * FRAME_SECONDS
+                    + PLAYBACK_LEAD_SECONDS
+                    - loop.time()
+                )
+                if ahead > 0:
+                    await asyncio.sleep(ahead)
+        await self._send({"event": "mark", "streamSid": self.stream_sid, "mark": {"name": mark}})
+
+    async def _synthesize(self, text: str) -> bytes:
+        return await synthesize_mulaw_async(
+            text, self.settings.deepgram_api_key, self.settings.tts_model
         )
 
     async def _clear_playback(self) -> None:
         self.bot_speaking = False
+        task, self._playback_task = self._playback_task, None
+        if task is not None:
+            task.cancel()
         await self._send({"event": "clear", "streamSid": self.stream_sid})
 
     async def _end_after_playback(self) -> None:
@@ -236,8 +290,7 @@ class MediaStreamBridge:
             return
         if self.session is None:
             return
-        if await self.session.handle_silence():
-            await self._end_after_playback()
+        await self._run_turn(self.session.handle_silence())
 
     async def _send(self, message: dict[str, Any]) -> None:
         async with self._send_lock:
@@ -249,6 +302,22 @@ class MediaStreamBridge:
             await self.websocket.close()
         except (RuntimeError, WebSocketDisconnect):
             pass
+
+
+def speech_chunks(text: str, limit: int = SPEECH_CHUNK_CHARS) -> list[str]:
+    """Group a prompt into sentence-sized pieces so speech can start quickly."""
+
+    chunks: list[str] = []
+    current = ""
+    for sentence in re.findall(r"[^.!?]+[.!?]*\s*", text.strip()) or [text.strip()]:
+        if current and len(current) + len(sentence) > limit:
+            chunks.append(current.strip())
+            current = sentence
+        else:
+            current += sentence
+    if current.strip():
+        chunks.append(current.strip())
+    return chunks or [text]
 
 
 def create_app(settings: TelephonySettings | None = None) -> FastAPI:

@@ -157,13 +157,15 @@ def test_media_stream_answers_and_records_the_survey(client):
                 }
             )
         )
-        outbound = [json.loads(websocket.receive_text()) for _ in range(3)]
+        outbound = []
+        while not outbound or outbound[-1]["event"] != "mark":
+            outbound.append(json.loads(websocket.receive_text()))
         websocket.send_text(json.dumps({"event": "stop"}))
 
     assert outbound[0]["event"] == "media"
     assert outbound[0]["streamSid"] == "MZ1"
     assert base64.b64decode(outbound[0]["media"]["payload"]) == b"\xff" * 160
-    assert outbound[2] == {"event": "mark", "streamSid": "MZ1", "mark": {"name": "prompt-1"}}
+    assert outbound[-1] == {"event": "mark", "streamSid": "MZ1", "mark": {"name": "prompt-1"}}
 
     record = client.app.state.persistence.calls["sess-1"]
     assert record.answers == [{"question_id": "hoos_stairs", "value": "moderate"}]

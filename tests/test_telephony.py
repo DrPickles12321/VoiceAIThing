@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+import phone_app
 from app.patient_repository import InMemoryPatientRepository
 from app.survey_engine import SafeSurveyEngine
 from app.telephony import twilio
@@ -191,3 +192,16 @@ def test_call_session_completes_and_prepares_handoff():
     assert session.handoff is not None
     assert "survey is complete" in spoken[-1]
     assert session.persistence.calls["sess-1"].final_status == "complete"
+
+
+def test_speech_chunks_split_long_prompts_into_sentence_groups():
+    text = "Hello there. " + "This sentence is here to make the prompt long. " * 6
+    chunks = phone_app.speech_chunks(text)
+
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 220 for chunk in chunks)
+    assert "".join(chunk + " " for chunk in chunks).split() == text.split()
+
+
+def test_speech_chunks_keep_a_short_prompt_whole():
+    assert phone_app.speech_chunks("How is your hip today?") == ["How is your hip today?"]
