@@ -64,6 +64,49 @@ def test_require_e164_rejects_local_format():
     assert twilio.require_e164(" +1 415 555 0123 ") == "+14155550123"
 
 
+def test_place_call_retries_without_status_callback_on_trial_account(monkeypatch):
+    attempts: list[list[tuple[str, str]]] = []
+
+    def fake_post(account_sid, auth_token, fields, timeout):
+        attempts.append(fields)
+        if any(name == "StatusCallback" for name, _ in fields):
+            raise twilio.TwilioError(
+                "Twilio rejected the call request (400): "
+                "trial accounts have limited parameter access"
+            )
+        return {"sid": "CA123", "status": "queued", "to": "+14155550123"}
+
+    monkeypatch.setattr(twilio, "_post_call", fake_post)
+    placed = twilio.place_call(
+        account_sid="AC1",
+        auth_token="token",
+        to_number="+14155550123",
+        from_number="+14155550100",
+        answer_url="https://tunnel.example.com/twilio/voice",
+        status_callback_url="https://tunnel.example.com/twilio/status",
+    )
+
+    assert placed.call_sid == "CA123"
+    assert len(attempts) == 2
+    assert not any(name == "StatusCallback" for name, _ in attempts[1])
+
+
+def test_place_call_reraises_other_twilio_errors(monkeypatch):
+    def fake_post(account_sid, auth_token, fields, timeout):
+        raise twilio.TwilioError("Twilio rejected the call request (401): unauthorized")
+
+    monkeypatch.setattr(twilio, "_post_call", fake_post)
+    with pytest.raises(twilio.TwilioError):
+        twilio.place_call(
+            account_sid="AC1",
+            auth_token="token",
+            to_number="+14155550123",
+            from_number="+14155550100",
+            answer_url="https://tunnel.example.com/twilio/voice",
+            status_callback_url="https://tunnel.example.com/twilio/status",
+        )
+
+
 def test_validate_signature_matches_twilio_algorithm():
     token = "12345"
     url = "https://tunnel.example.com/twilio/voice"

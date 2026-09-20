@@ -71,29 +71,12 @@ def validate_signature(auth_token: str, url: str, params: dict[str, str], signat
     return hmac.compare_digest(base64.b64encode(digest).decode("ascii"), signature or "")
 
 
-def place_call(
+def _post_call(
     account_sid: str,
     auth_token: str,
-    to_number: str,
-    from_number: str,
-    answer_url: str,
-    status_callback_url: str | None = None,
-    timeout: float = 20.0,
-) -> PlacedCall:
-    """Dial ``to_number`` and point Twilio at ``answer_url`` for the TwiML."""
-
-    fields = [
-        ("To", require_e164(to_number)),
-        ("From", require_e164(from_number)),
-        ("Url", answer_url),
-        ("Method", "POST"),
-    ]
-    if status_callback_url:
-        fields.append(("StatusCallback", status_callback_url))
-        fields.append(("StatusCallbackMethod", "POST"))
-        for event in ("initiated", "ringing", "answered", "completed"):
-            fields.append(("StatusCallbackEvent", event))
-
+    fields: list[tuple[str, str]],
+    timeout: float,
+) -> dict[str, object]:
     credentials = base64.b64encode(f"{account_sid}:{auth_token}".encode("utf-8")).decode("ascii")
     req = request.Request(
         f"{TWILIO_API_ROOT}/Accounts/{account_sid}/Calls.json",
@@ -106,16 +89,53 @@ def place_call(
     )
     try:
         with request.urlopen(req, timeout=timeout) as response:
-            payload = json.load(response)
+            payload: dict[str, object] = json.load(response)
+            return payload
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:500]
         raise TwilioError(f"Twilio rejected the call request ({exc.code}): {detail}") from exc
     except Exception as exc:
         raise TwilioError("Could not reach the Twilio API.") from exc
+
+
+def place_call(
+    account_sid: str,
+    auth_token: str,
+    to_number: str,
+    from_number: str,
+    answer_url: str,
+    status_callback_url: str | None = None,
+    timeout: float = 20.0,
+) -> PlacedCall:
+    """Dial ``to_number`` and point Twilio at ``answer_url`` for the TwiML.
+
+    Trial accounts reject the status-callback parameters, so the call is retried
+    without them instead of failing.
+    """
+
+    required = [
+        ("To", require_e164(to_number)),
+        ("From", require_e164(from_number)),
+        ("Url", answer_url),
+        ("Method", "POST"),
+    ]
+    optional: list[tuple[str, str]] = []
+    if status_callback_url:
+        optional.append(("StatusCallback", status_callback_url))
+        optional.append(("StatusCallbackMethod", "POST"))
+        for event in ("initiated", "ringing", "answered", "completed"):
+            optional.append(("StatusCallbackEvent", event))
+
+    try:
+        payload = _post_call(account_sid, auth_token, required + optional, timeout)
+    except TwilioError as exc:
+        if not optional or "limited parameter access" not in str(exc):
+            raise
+        payload = _post_call(account_sid, auth_token, required, timeout)
     return PlacedCall(
-        call_sid=payload.get("sid", ""),
-        status=payload.get("status", "unknown"),
-        to_number=payload.get("to", to_number),
+        call_sid=str(payload.get("sid", "")),
+        status=str(payload.get("status", "unknown")),
+        to_number=str(payload.get("to", to_number)),
     )
 
 
