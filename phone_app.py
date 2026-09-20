@@ -95,6 +95,8 @@ class MediaStreamBridge:
         self._line_open = asyncio.Event()
         self._greeted = asyncio.Event()
         self._listen_from = 0.0
+        self._interruptible = False
+        self._playback: asyncio.Task[None] | None = None
 
     async def run(self) -> None:
         await self.websocket.accept()
@@ -226,11 +228,18 @@ class MediaStreamBridge:
             await self._greeted.wait()
             # The handset feeds our own voice back down the inbound track, so
             # anything heard mid-prompt, or in its echo tail, would otherwise be
-            # transcribed as the caller's answer.
-            if self.bot_speaking or asyncio.get_running_loop().time() < self._listen_from:
+            # transcribed as the caller's answer. Only the closing chunk of a
+            # prompt, the question itself, can be talked over.
+            if self.bot_speaking and not (
+                self._interruptible and event.kind == "speech_started"
+            ):
+                continue
+            if asyncio.get_running_loop().time() < self._listen_from:
                 continue
             if event.kind == "speech_started":
                 self._cancel_silence_timer()
+                if self.bot_speaking:
+                    await self._stop_playback()
             elif event.kind == "transcript" and event.is_final:
                 self._cancel_silence_timer()
                 self.session.add_transcript(event.text)
@@ -243,9 +252,12 @@ class MediaStreamBridge:
             return
         self._cancel_silence_timer()
         self.bot_speaking = True
+        self._interruptible = False
         self._mark_counter += 1
         self._last_mark = f"prompt-{self._mark_counter}"
-        await self._stream_speech(text, self._last_mark)
+        self._playback = asyncio.create_task(self._stream_speech(text, self._last_mark))
+        # Waiting this way keeps a barge-in cancellation local to the playback.
+        await asyncio.wait({self._playback})
 
     async def _stream_speech(self, text: str, mark: str) -> None:
         """Synthesize the prompt piece by piece and play it at speaking speed.
@@ -263,6 +275,7 @@ class MediaStreamBridge:
         pending = asyncio.create_task(self._synthesize(plan[0][0]))
         for index, (chunk, pause) in enumerate(plan):
             audio = await pending
+            self._interruptible = index + 1 == len(plan)
             if index + 1 < len(plan):
                 pending = asyncio.create_task(self._synthesize(plan[index + 1][0]))
             logger.info(
@@ -290,6 +303,19 @@ class MediaStreamBridge:
                 if ahead > 0:
                     await asyncio.sleep(ahead)
         await self._send({"event": "mark", "streamSid": self.stream_sid, "mark": {"name": mark}})
+
+    async def _stop_playback(self) -> None:
+        """Drop the rest of the prompt and Twilio's buffer of it, and listen."""
+
+        self.bot_speaking = False
+        self._interruptible = False
+        playback, self._playback = self._playback, None
+        if playback is not None:
+            playback.cancel()
+        await self._send({"event": "clear", "streamSid": self.stream_sid})
+        # No mark will come back for a prompt we abandoned, so arm the timer
+        # that reprompts a caller who goes quiet again.
+        self._start_silence_timer()
 
     async def _synthesize(self, text: str) -> bytes:
         return await synthesize_mulaw_async(

@@ -210,3 +210,75 @@ def test_media_stream_ignores_what_it_hears_while_it_is_still_talking(client):
     record = client.app.state.persistence.calls["sess-1"]
     assert record.answers == []
     assert not any(line.startswith("patient:") for line in record.transcript)
+
+
+class StubWebSocket:
+    """Enough of a Twilio media socket to drive the bridge directly."""
+
+    def __init__(self, inbound: list[dict]):
+        self.inbound = [json.dumps(message) for message in inbound]
+        self.sent: list[dict] = []
+
+    async def accept(self) -> None:
+        return None
+
+    async def receive_text(self) -> str:
+        while not self.inbound:
+            await asyncio.sleep(0.01)
+        return self.inbound.pop(0)
+
+    async def send_text(self, text: str) -> None:
+        self.sent.append(json.loads(text))
+
+    async def close(self) -> None:
+        return None
+
+
+def test_the_caller_can_talk_over_the_question_but_not_the_greeting(client):
+    """Barge-in opens up only for the closing chunk of a prompt."""
+
+    start = {
+        "event": "start",
+        "streamSid": "MZ1",
+        "start": {
+            "streamSid": "MZ1",
+            "callSid": "CA1",
+            "customParameters": {"patientCode": "RGN-0417", "sessionId": "sess-2"},
+        },
+    }
+    websocket = StubWebSocket([start])
+    bridge = phone_app.MediaStreamBridge(
+        websocket,
+        client.app.state.settings,
+        phone_app.InMemoryPatientRepository(),
+        client.app.state.persistence,
+        transcriber_factory=ScriptedTranscriber,
+    )
+
+    async def until(predicate) -> None:
+        deadline = asyncio.get_running_loop().time() + 10
+        while not predicate():
+            assert asyncio.get_running_loop().time() < deadline, "timed out"
+            await asyncio.sleep(0.01)
+
+    async def interrupt() -> None:
+        await until(lambda: bridge._interruptible)
+        ScriptedTranscriber.queue.extend(
+            [
+                SpeechEvent("speech_started"),
+                SpeechEvent("transcript", "moderate", True),
+                SpeechEvent("utterance_end"),
+            ]
+        )
+        record = client.app.state.persistence.calls["sess-2"]
+        await until(lambda: any(line.startswith("patient:") for line in record.transcript))
+        websocket.inbound.append(json.dumps({"event": "stop"}))
+
+    async def drive() -> None:
+        await asyncio.gather(bridge.run(), interrupt())
+
+    asyncio.run(drive())
+
+    record = client.app.state.persistence.calls["sess-2"]
+    assert any(line.startswith("patient: moderate") for line in record.transcript)
+    assert any(message["event"] == "clear" for message in websocket.sent)
