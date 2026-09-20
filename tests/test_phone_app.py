@@ -62,6 +62,7 @@ def test_config_reports_ready(client):
         "deepgram_configured": True,
         "twilio_configured": True,
         "public_base_url": "https://tunnel.example.com",
+        "llm_configured": False,
         "ready": True,
     }
 

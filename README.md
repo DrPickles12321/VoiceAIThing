@@ -49,7 +49,8 @@ PATIENT_CODE=RGN-0417
 PATIENT_REPOSITORY=in_memory
 ```
 
-To interpret conversational answers in the desktop voice app, configure:
+To interpret conversational answers in the desktop voice app and the phone
+survey, configure:
 
 ```env
 SURVEY_EXTRACTOR=openai

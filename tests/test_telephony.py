@@ -156,6 +156,7 @@ def test_call_session_runs_a_confirmed_answer():
     assert "survey" in spoken[0]
     assert "hip pain" in spoken[0]
     assert "HOOS JR HIP SURVEY" not in spoken[0]
+    assert spoken[0].count("automated survey helper") == 1
 
     session.add_transcript("moderate")
     assert asyncio.run(session.flush_utterance()) is False

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Awaitable, Callable
 
 from ..gait_handoff import GaitHandoff, GaitHandoffService
@@ -57,9 +58,9 @@ class PhoneCallSession:
         )
         if record.final_status is None:
             record.status = "in_progress"
-        intro = self.voice.doctor_intro(patient.condition_category.value).text
-        first_prompt = self.engine.start()
-        await self._say(f"{intro} {_spoken(first_prompt)}")
+        # ``start`` already opens with the intro script the voice adapter holds.
+        first_prompt = await asyncio.to_thread(self.engine.start)
+        await self._say(_spoken(first_prompt))
 
     def add_transcript(self, text: str) -> None:
         cleaned = text.strip()
@@ -75,7 +76,9 @@ class PhoneCallSession:
             return self.finished
         self._silent_reprompts = 0
         self.persistence.append_transcript(self.session_id, f"patient: {transcript}")
-        prompt, answer = self.engine.handle_response(transcript)
+        # Interpretation may call a language model, which must not block the
+        # event loop that keeps call audio flowing in both directions.
+        prompt, answer = await asyncio.to_thread(self.engine.handle_response, transcript)
         if answer is not None and answer.confirmed:
             self.persistence.record_answer(
                 self.session_id,

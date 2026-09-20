@@ -24,6 +24,11 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from app.answer_interpreter import (
+    AnswerInterpreter,
+    OpenAIAnswerInterpreter,
+    build_answer_interpreter,
+)
 from app.patient_repository import InMemoryPatientRepository, PatientNotFoundError
 from app.persistence import InMemoryPersistence
 from app.survey_engine import SafeSurveyEngine
@@ -41,6 +46,7 @@ SILENCE_TIMEOUT_SECONDS = 8.0
 FRAME_SECONDS = 0.02
 PLAYBACK_LEAD_SECONDS = 2.0
 SPEECH_CHUNK_CHARS = 90
+LINE_OPEN_TIMEOUT_SECONDS = 3.0
 CARRIER_FAILURES = {"busy", "no-answer", "failed", "canceled"}
 
 logger = logging.getLogger("phone_app")
@@ -61,11 +67,13 @@ class MediaStreamBridge:
         repository: InMemoryPatientRepository,
         persistence: InMemoryPersistence,
         transcriber_factory=None,
+        interpreter: AnswerInterpreter | None = None,
     ):
         self.websocket = websocket
         self.settings = settings
         self.repository = repository
         self.persistence = persistence
+        self.interpreter = interpreter
         self.transcriber_factory = transcriber_factory or DeepgramTranscriber
         self.stream_sid: str | None = None
         self.session: PhoneCallSession | None = None
@@ -81,6 +89,8 @@ class MediaStreamBridge:
         self._turn_lock = asyncio.Lock()
         self._tasks: list[asyncio.Task[None]] = []
         self._playback_task: asyncio.Task[None] | None = None
+        self._line_open = asyncio.Event()
+        self._greeted = asyncio.Event()
 
     async def run(self) -> None:
         await self.websocket.accept()
@@ -123,7 +133,7 @@ class MediaStreamBridge:
             start.get("mediaFormat"),
         )
         try:
-            engine = SafeSurveyEngine(self.repository, patient_code)
+            engine = SafeSurveyEngine(self.repository, patient_code, interpreter=self.interpreter)
         except PatientNotFoundError:
             logger.error("Unknown patient code on call %s", session_id)
             await self._close()
@@ -144,7 +154,7 @@ class MediaStreamBridge:
         # Both the survey turns and the speech events run off the receive loop so
         # inbound audio keeps flowing to Deepgram while a prompt is playing.
         self._tasks.append(asyncio.create_task(self._pump_speech_events()))
-        self._tasks.append(asyncio.create_task(self._run_turn(self.session.begin())))
+        self._tasks.append(asyncio.create_task(self._greet()))
 
     async def _on_media(self, message: dict[str, Any]) -> None:
         if self.transcriber is None:
@@ -154,6 +164,7 @@ class MediaStreamBridge:
             return
         payload = media.get("payload")
         if payload:
+            self._line_open.set()
             self._inbound_frames += 1
             if self._inbound_frames % 250 == 0:
                 logger.info(
@@ -169,6 +180,24 @@ class MediaStreamBridge:
             return
         self.bot_speaking = False
         self._start_silence_timer()
+
+    async def _greet(self) -> None:
+        """Open the survey once the carrier is actually carrying audio.
+
+        Twilio opens the stream as the call is answered, and anything sent
+        before the first inbound frame arrives can be clipped off the front of
+        the greeting.
+        """
+
+        assert self.session is not None
+        try:
+            await asyncio.wait_for(self._line_open.wait(), LINE_OPEN_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            logger.warning("Stream %s heard no inbound audio; greeting anyway", self.stream_sid)
+        try:
+            await self._run_turn(self.session.begin())
+        finally:
+            self._greeted.set()
 
     async def _run_turn(self, coroutine: Awaitable[bool | None]) -> None:
         """Serialize survey turns; one prompt finishes speaking before the next."""
@@ -188,6 +217,8 @@ class MediaStreamBridge:
         async for event in self.transcriber.events():
             if self.session is None:
                 continue
+            # Nothing the caller says counts as an answer before we have asked.
+            await self._greeted.wait()
             if event.kind == "speech_started":
                 self._cancel_silence_timer()
                 if self.bot_speaking:
@@ -326,6 +357,7 @@ def create_app(settings: TelephonySettings | None = None) -> FastAPI:
     app = FastAPI(title="VoiceAIThing phone survey")
     repository = InMemoryPatientRepository()
     persistence = InMemoryPersistence()
+    interpreter = build_answer_interpreter()
     sessions_by_call_sid: dict[str, str] = {}
     app.state.settings = resolved
     app.state.persistence = persistence
@@ -336,6 +368,7 @@ def create_app(settings: TelephonySettings | None = None) -> FastAPI:
             "deepgram_configured": resolved.deepgram_ready,
             "twilio_configured": resolved.twilio_ready,
             "public_base_url": resolved.public_base_url,
+            "llm_configured": isinstance(interpreter, OpenAIAnswerInterpreter),
             "ready": resolved.ready,
         }
 
@@ -441,7 +474,9 @@ def create_app(settings: TelephonySettings | None = None) -> FastAPI:
 
     @app.websocket(MEDIA_PATH)
     async def media(websocket: WebSocket) -> None:
-        await MediaStreamBridge(websocket, resolved, repository, persistence).run()
+        await MediaStreamBridge(
+            websocket, resolved, repository, persistence, interpreter=interpreter
+        ).run()
 
     @app.get("/")
     def index() -> FileResponse:

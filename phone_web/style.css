@@ -86,7 +86,7 @@ button:disabled {
 }
 
 .config.ok {
-  color: #1c7a4a;
+  color: var(--brand);
 }
 
 .config.warn {
@@ -128,8 +128,8 @@ button:disabled {
 }
 
 .badge[data-tone="live"] {
-  background: #e3f5ea;
-  color: #1c7a4a;
+  background: #dfe6fd;
+  color: var(--brand);
 }
 
 .badge[data-tone="done"] {
@@ -167,11 +167,13 @@ button:disabled {
 .transcript {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 0.25rem 0 0;
   display: grid;
   gap: 0.5rem;
+  align-content: start;
   max-height: 22rem;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .turn {
@@ -183,7 +185,9 @@ button:disabled {
 }
 
 .turn.patient {
-  background: #eaf4ed;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--brand);
 }
 
 .who {

@@ -19,14 +19,17 @@ const BADGES = {
 };
 
 let pollTimer = null;
+let renderedTranscript = "";
 
 async function loadConfig() {
   try {
     const response = await fetch("/api/config");
     const data = await response.json();
     if (data.ready) {
-      configLine.textContent = `Ready — Twilio and Deepgram configured, webhooks at ${data.public_base_url}`;
-      configLine.classList.add("ok");
+      configLine.textContent = data.llm_configured
+        ? `Ready — Twilio, Deepgram and conversational answers configured, webhooks at ${data.public_base_url}`
+        : `Ready, but answers are matched word for word — set OPENAI_API_KEY and SURVEY_EXTRACTOR=openai so phrases like "a moderate amount" are understood.`;
+      configLine.classList.add(data.llm_configured ? "ok" : "warn");
       return;
     }
     const missing = [];
@@ -56,6 +59,13 @@ function setBadge(status) {
 
 function renderTranscript(lines) {
   if (!lines.length) return;
+  const signature = lines.join("\n");
+  if (signature === renderedTranscript) return;
+  renderedTranscript = signature;
+  // Rebuilding the list resets the scroll position, so only follow the
+  // conversation when the operator is already reading the latest turn.
+  const following =
+    transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 40;
   transcript.replaceChildren();
   for (const line of lines) {
     const [speaker, ...rest] = line.split(": ");
@@ -68,7 +78,7 @@ function renderTranscript(lines) {
     item.append(who, document.createTextNode(text));
     transcript.appendChild(item);
   }
-  transcript.scrollTop = transcript.scrollHeight;
+  if (following) transcript.scrollTop = transcript.scrollHeight;
 }
 
 function renderAnswers(rows) {
@@ -133,6 +143,7 @@ dialer.addEventListener("submit", async (event) => {
   button.disabled = true;
   button.textContent = "Dialing…";
   transcript.replaceChildren();
+  renderedTranscript = "";
   answers.replaceChildren();
   live.hidden = false;
   setBadge("dialing");
