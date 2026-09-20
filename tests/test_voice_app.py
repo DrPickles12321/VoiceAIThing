@@ -1,6 +1,7 @@
 from app.patient_repository import InMemoryPatientRepository
 from app.survey_engine import SafeSurveyEngine
 from app.answer_interpreter import Interpretation
+from app.persistence import InMemoryPersistence
 from fastapi.testclient import TestClient
 import voice_app
 import asyncio
@@ -16,6 +17,7 @@ def test_voice_app_exposes_desktop_routes(monkeypatch):
     assert "/" in paths
     assert "/api/sessions" in paths
     assert "/api/sessions/{session_id}/audio" in paths
+    assert "/api/results" in paths
 
 
 def test_voice_flow_uses_existing_guarded_engine():
@@ -193,3 +195,26 @@ def test_preloaded_opening_is_immediately_available_on_first_session(monkeypatch
             assert response.content == b"preloaded-opening"
             assert response.headers["x-speech-cache"] == "hit"
         assert len(calls) == 2
+
+
+def test_voice_turns_persist_patient_id_transcript_and_survey_results(monkeypatch):
+    store = InMemoryPersistence()
+    monkeypatch.setattr(voice_app, "build_answer_interpreter", lambda: None)
+    monkeypatch.setenv("DEEPGRAM_API_KEY", "synthetic-test-key")
+    monkeypatch.setenv("SURVEY_EXTRACTOR", "exact")
+    monkeypatch.setattr(voice_app, "transcribe_with_deepgram", lambda *args: "mild")
+    app = create_app(persistence=store)
+    with TestClient(app) as client:
+        started = client.post("/api/sessions", params={"patient_code": "RGN-0417"}).json()
+        url = f"/api/sessions/{started['session_id']}/audio"
+        files = {"audio": ("answer.webm", b"synthetic-audio", "audio/webm")}
+        client.post(url, files=files)
+        payload = client.get("/api/results", params={"patient_code": "RGN-0417"}).json()
+        assert client.get("/api/config").json()["conversation_store"] == "in_memory"
+    row = payload["results"][0]
+    assert row["patient_id"] == "RGN-0417"
+    assert row["patient_uuid"] == "pt_orthopedic_demo"
+    assert "assistant:" in row["transcript"]
+    assert "patient: mild" in row["transcript"]
+    assert row["survey_results"][0]["question_key"] == "hoos_stairs"
+    assert row["survey_results"][0]["confirmed_value"] == "mild"

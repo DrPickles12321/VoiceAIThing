@@ -10,7 +10,8 @@ The supported runtime is the safe core under `app/`:
 - `app/patient_repository.py` performs strict patient lookup
 - `app/question_loader.py` selects question banks by condition
 - `app/survey_engine.py` manages the bounded confirmation flow
-- `app/persistence.py` stores call metadata in the in-memory fallback layer
+- `app/persistence.py` stores call metadata and conversation transcripts in memory, and writes through to Supabase when server credentials are set
+- `app/database.py` is the server-side Supabase REST adapter (service-role key never goes to the browser)
 - `app/voice_adapter.py` defines the voice interaction contract
 - `app/gait_handoff.py` prepares the downstream handoff payload without real delivery
 

@@ -14,6 +14,8 @@ New SQL lives in `supabase/migrations/`:
 1. `20260919120000_survey_longitudinal_core.sql` — tables, indexes, scoring
    functions, dashboard/audit views, RLS.
 2. `20260919120100_survey_synthetic_seed.sql` — idempotent demo rows.
+3. `20260919213000_conversation_turns_and_results.sql` — conversation
+   transcript turns, per-patient results view, and the stroke question bank.
 
 Python scoring that mirrors the SQL rule (confirmed answers only) lives in
 `app/scoring.py`. It can score in-memory `SafeSurveyEngine` answers without a
@@ -54,6 +56,8 @@ questions instead of duplicating a KOOS-style table.
 - `audit_events` — workflow actions such as `survey_started`,
   `answer_proposed`, `answer_confirmed`, `answer_corrected`,
   `survey_completed`.
+- `conversation_turns` — ordered conversation text (patient STT transcript
+  plus application-owned assistant prompts). **No audio.**
 
 ## Scoring
 
@@ -101,6 +105,21 @@ ORDER BY patient_display_id, question_order;
 
 Both views use `security_invoker = true`, so base-table RLS still applies.
 
+Per-user transcript + results (identifying code, full text transcript, structured answers):
+
+```sql
+SELECT
+  patient_id,
+  patient_uuid,
+  follow_up_label,
+  survey_status,
+  total_score,
+  transcript,
+  survey_results
+FROM public.patient_conversation_results
+ORDER BY completed_at DESC NULLS LAST, patient_id;
+```
+
 ## Seed data
 
 Idempotent inserts (safe to re-run; they do not delete existing rows):
@@ -128,6 +147,7 @@ Local Postgres:
 ```bash
 psql "$DATABASE_URL" -f supabase/migrations/20260919120000_survey_longitudinal_core.sql
 psql "$DATABASE_URL" -f supabase/migrations/20260919120100_survey_synthetic_seed.sql
+psql "$DATABASE_URL" -f supabase/migrations/20260919213000_conversation_turns_and_results.sql
 ```
 
 On vanilla Postgres, Supabase roles (`anon`, `authenticated`, `service_role`)
@@ -136,14 +156,23 @@ tables. Enable equivalent roles before exposing the database.
 
 ## How the backend should connect
 
-The FastAPI voice app still uses `InMemoryPatientRepository` and
-`InMemoryPersistence`. When a server-side database client is added later:
+The FastAPI voice app still looks up patients in memory. When `SUPABASE_URL`
+and `SUPABASE_SERVICE_ROLE_KEY` are set in the **server** `.env`, it also
+writes each desktop conversation to Supabase:
 
-- set `DATABASE_URL` **or** `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`
-  in server environment only (see `.env.example`)
+- `patients.display_id` — synthetic identifying code (`RGN-0417`, …)
+- `conversation_turns` — transcript text (not audio)
+- `survey_responses` / `survey_instances.total_score` — confirmed results only
+
+`GET /api/results` returns those fields for local review. Pytest always uses
+the in-memory store so tests never write to a shared database.
+
+Set `CONVERSATION_STORE=in_memory` to disable the database write even when
+keys are present.
+
 - never put the service-role key in `voice_web/`, `NEXT_PUBLIC_*`, or any
   browser bundle
-- keep `PATIENT_REPOSITORY=in_memory` until persistence is intentionally
-  switched
+- keep `PATIENT_REPOSITORY=in_memory` unless patient lookup is intentionally
+  switched later
 
 See [SECURITY.md](SECURITY.md) for RLS assumptions and production gaps.
