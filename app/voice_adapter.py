@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
+from .conversation_policy import COMPLETE, INTRO
+
 
 @dataclass(frozen=True)
 class VoiceTurn:
@@ -23,11 +25,8 @@ class VoiceAdapter:
         self.stt = stt or (lambda text: text)
 
     def doctor_intro(self, condition_category: str) -> VoiceTurn:
-        intro = (
-            "Hello, this is your care team. I’m going to ask a few short questions "
-            f"about your {condition_category} recovery and then we’ll send a link for follow-up."
-        )
-        return VoiceTurn("assistant", self.tts(intro))
+        """Compatibility entry point; a real doctor's recording is a separate asset."""
+        return VoiceTurn("assistant", self.tts(INTRO))
 
     def ask_question(self, question_prompt: str) -> VoiceTurn:
         return VoiceTurn("assistant", self.tts(question_prompt))
@@ -36,11 +35,7 @@ class VoiceAdapter:
         return VoiceTurn("assistant", self.tts(confirmation_text))
 
     def closing_script(self) -> VoiceTurn:
-        script = (
-            "Thank you so much for your time today. We’ll send you a link shortly to complete "
-            "a quick recording for the gait tracker."
-        )
-        return VoiceTurn("assistant", self.tts(script))
+        return VoiceTurn("assistant", self.tts(COMPLETE))
 
     def normalize_input(self, transcript: str) -> str:
         return self.stt(transcript).strip()
