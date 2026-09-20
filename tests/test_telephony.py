@@ -8,6 +8,7 @@ import pytest
 from websockets.exceptions import ConnectionClosedError
 
 import phone_app
+from app.conversation_policy import sms_body
 from app.patient_repository import InMemoryPatientRepository
 from app.survey_engine import SafeSurveyEngine
 from app.telephony import call_session, twilio
@@ -132,6 +133,12 @@ def test_listen_and_speak_urls_use_telephony_audio_format():
     assert "encoding=mulaw" in speak and "container=none" in speak
 
 
+def test_listen_url_boosts_the_answer_words_on_nova_3_only():
+    listen = listen_url("nova-3", 1200)
+    assert "keyterm=moderate" in listen and "keyterm=mild" in listen
+    assert "keyterm" not in listen_url("nova-2-phonecall", 1200)
+
+
 def test_parse_message_normalizes_deepgram_events():
     results = json.dumps(
         {"type": "Results", "is_final": True, "channel": {"alternatives": [{"transcript": "mild"}]}}
@@ -190,10 +197,11 @@ def test_call_session_completes_and_prepares_handoff():
             await session.flush_utterance()
 
     asyncio.run(scenario())
-    assert session.finished
     assert session.handoff is not None
-    assert any("survey is complete" in line for line in spoken)
-    assert session.persistence.calls["sess-1"].final_status == "complete"
+    # The survey's own closing is dropped in favour of the gait request, so the
+    # caller is not thanked and sent off twice in a row.
+    assert not any("survey is complete" in line for line in spoken)
+    assert any("short video of you walking" in line for line in spoken)
 
 
 def test_call_session_texts_the_gait_link_and_walks_through_setup():
@@ -214,27 +222,68 @@ def test_call_session_texts_the_gait_link_and_walks_through_setup():
         session_id="sess-2",
         to_number="+14155550123",
         sms_sender=sms_sender,
+        walk_seconds=0.0,
     )
 
-    async def scenario() -> None:
+    async def survey() -> bool:
+        await session.begin()
+        done = False
+        for _ in range(len(session.engine.session.questions)):
+            session.add_transcript("none")
+            done = await session.flush_utterance()
+        return done
+
+    assert asyncio.run(survey()) is False
+    assert session.finished is False
+    assert session.handoff is not None
+    assert session.handoff.sms_sent is True
+    assert sent == [
+        ("+14155550123", sms_body(session.handoff.link or "")),
+    ]
+    assert session.handoff.link is not None and session.handoff.link in sent[0][1]
+
+    # The caller is asked to open the link and nothing else is said until they do.
+    assert "short video of you walking" in spoken[-2]
+    assert "tell me when" in spoken[-1]
+    assert not any("Live Camera" in line for line in spoken)
+
+    async def acknowledge() -> bool:
+        session.add_transcript("okay I have it open")
+        return await session.flush_utterance()
+
+    assert asyncio.run(acknowledge()) is True
+    assert session.finished
+    assert "Live Camera" in spoken[-3]
+    assert "fifteen seconds" in spoken[-2]
+    assert "One. Two. Three." in spoken[-2]
+    assert "Take care of yourself" in spoken[-1]
+    assert session.persistence.calls["sess-2"].final_status == "complete"
+
+
+def test_call_session_goes_ahead_when_the_caller_never_confirms_the_link():
+    engine = SafeSurveyEngine(InMemoryPatientRepository(), "RGN-0417")
+    spoken: list[str] = []
+
+    async def speak(text: str) -> None:
+        spoken.append(text)
+
+    session = PhoneCallSession(
+        engine, speak, session_id="sess-4", max_silent_reprompts=1, walk_seconds=0.0
+    )
+
+    async def scenario() -> bool:
         await session.begin()
         for _ in range(len(session.engine.session.questions)):
             session.add_transcript("none")
             await session.flush_utterance()
+        assert await session.handle_silence() is False
+        assert "say ‘ready’" in spoken[-1]
+        return await session.handle_silence()
 
-    asyncio.run(scenario())
-
-    assert session.finished
-    assert session.handoff is not None
-    assert session.handoff.sms_sent is True
-    assert sent == [("+14155550123", session.handoff.link)]
-
-    closing_index = max(i for i, line in enumerate(spoken) if "survey is complete" in line)
-    tail = spoken[closing_index + 1 :]
-    assert "texted you a secure link" in tail[0]
-    assert "Live Camera" in tail[1]
-    assert "count to three" in tail[2]
-    assert tail[3] == "Great, thank you! Take care."
+    assert asyncio.run(scenario()) is True
+    # A quiet caller after a finished survey is walked through it, not escalated.
+    assert session.engine.session.needs_human_review is False
+    assert "Take care of yourself" in spoken[-1]
 
 
 def test_call_session_still_completes_when_sms_sending_fails():
@@ -253,6 +302,7 @@ def test_call_session_still_completes_when_sms_sending_fails():
         session_id="sess-3",
         to_number="+14155550123",
         sms_sender=failing_sms_sender,
+        walk_seconds=0.0,
     )
 
     async def scenario() -> None:
@@ -260,13 +310,15 @@ def test_call_session_still_completes_when_sms_sending_fails():
         for _ in range(len(session.engine.session.questions)):
             session.add_transcript("none")
             await session.flush_utterance()
+        session.add_transcript("ready")
+        await session.flush_utterance()
 
     asyncio.run(scenario())
 
     assert session.finished
     assert session.handoff is not None
     assert session.handoff.sms_sent is False
-    assert spoken[-1] == "Great, thank you! Take care."
+    assert "Take care of yourself" in spoken[-1]
     assert session.persistence.calls["sess-3"].final_status == "complete"
 
 

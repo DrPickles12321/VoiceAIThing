@@ -160,19 +160,33 @@ INTRO = (
     "You can ask me to repeat, pause, or stop at any time."
 )
 COMPLETE = "Thank you for sharing your answers with me. The survey is complete."
-LINK_SENT = (
-    "I’ve just texted you a secure link. Go ahead and open it on your phone or computer "
-    "whenever you’re ready."
+GAIT_INTRO = (
+    "Thank you for those answers. There is one more thing your care team would like, "
+    "and then we are done."
+    f"{PARAGRAPH}"
+    "They would like a short video of you walking. It shows them how steady you are on "
+    "your feet as you heal, which is hard to tell from answers alone, and it takes about "
+    "a minute. I am texting you a secure link to the camera page now."
 )
+LINK_SENT = (
+    "You should have the text in a moment. Open the link on your phone, and tell me when "
+    "you have it up."
+)
+LINK_REMINDER = "No rush at all. Just say ‘ready’ once you have the link open."
 WALKTHROUGH_GUIDANCE = (
-    "Tap the “Live Camera” mode, prop your device up against a stable surface where your "
-    "full body is visible, and step back a few paces."
+    "Great. Tap the “Live Camera” mode, then prop your phone against something steady "
+    "where your whole body is in view, and step back a few paces."
 )
 WALKTHROUGH_COUNTDOWN = (
-    "When you’re ready, I’ll count to three, and you can walk slowly across the frame "
-    "from left to right. One. Two. Three. Go ahead."
+    "When I reach three, walk back and forth in front of the camera at your normal pace "
+    "for about fifteen seconds."
+    f"{PARAGRAPH}"
+    "One. Two. Three. Go ahead."
 )
-WALKTHROUGH_CLOSING = "Great, thank you! Take care."
+WALKTHROUGH_CLOSING = (
+    "That is everything. Thank you, this really does help your care team follow your "
+    "recovery. Take care of yourself, and goodbye."
+)
 STOPPED = "Of course. We’ll stop here. Thank you for your time."
 PAUSED = "Of course. Take your time. Say ‘resume’ when you’re ready, or ‘stop’ to finish."
 REVIEW = (
@@ -183,6 +197,16 @@ MEDICAL_BOUNDARY = (
     "I can help record your survey answers, but I can’t give medical advice. "
     "Please discuss that question with your care team."
 )
+
+
+def sms_body(link: str) -> str:
+    """The text the patient gets, with the gait-checker link in it."""
+
+    return (
+        "Your care team's walking check-in: "
+        f"{link} "
+        "Open this on your phone and follow along with the call."
+    )
 
 
 def question_text(question, index: int, total: int) -> str:

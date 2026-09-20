@@ -4,13 +4,27 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
-from typing import AsyncIterator, Awaitable, Callable
+from typing import AsyncIterator, Awaitable, Callable, Sequence
 from urllib.parse import urlencode
 
 import websockets
 
 DEEPGRAM_LISTEN_URL = "wss://api.deepgram.com/v1/listen"
 KEEPALIVE_TIMEOUT_SECONDS = 60.0
+# Words the survey lives or dies on, boosted so a narrowband phone line does not
+# turn "mild" into "my old". Deepgram takes these on nova-3 only.
+ANSWER_KEYTERMS = (
+    "none",
+    "mild",
+    "moderate",
+    "severe",
+    "extreme",
+    "yes",
+    "no",
+    "repeat",
+    "ready",
+    "stop",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +41,11 @@ class SpeechEvent:
     is_final: bool = False
 
 
-def listen_url(model: str, utterance_end_ms: int) -> str:
+def listen_url(
+    model: str,
+    utterance_end_ms: int,
+    keyterms: Sequence[str] = ANSWER_KEYTERMS,
+) -> str:
     query = urlencode(
         {
             "model": model,
@@ -43,6 +61,8 @@ def listen_url(model: str, utterance_end_ms: int) -> str:
             "utterance_end_ms": utterance_end_ms,
         }
     )
+    if model.startswith("nova-3"):
+        query += "&" + urlencode([("keyterm", term) for term in keyterms])
     return f"{DEEPGRAM_LISTEN_URL}?{query}"
 
 

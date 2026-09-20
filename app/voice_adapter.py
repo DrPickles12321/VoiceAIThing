@@ -5,7 +5,9 @@ from typing import Callable
 
 from .conversation_policy import (
     COMPLETE,
+    GAIT_INTRO,
     INTRO,
+    LINK_REMINDER,
     LINK_SENT,
     WALKTHROUGH_CLOSING,
     WALKTHROUGH_COUNTDOWN,
@@ -44,9 +46,17 @@ class VoiceAdapter:
     def closing_script(self) -> VoiceTurn:
         return VoiceTurn("assistant", self.tts(COMPLETE))
 
+    def gait_request(self) -> VoiceTurn:
+        """Why the call is not over yet: the walking video the care team wants."""
+        return VoiceTurn("assistant", self.tts(GAIT_INTRO))
+
     def link_sent_confirmation(self) -> VoiceTurn:
         """Spoken right after the gait-checker link is texted (or logged as a fallback)."""
         return VoiceTurn("assistant", self.tts(LINK_SENT))
+
+    def link_reminder(self) -> VoiceTurn:
+        """For a caller still finding the text; asked again, gently."""
+        return VoiceTurn("assistant", self.tts(LINK_REMINDER))
 
     def walkthrough_guidance(self) -> VoiceTurn:
         """Live, step-by-step camera setup guidance -- fixed script, not model-generated."""
