@@ -41,6 +41,7 @@ class SafeSurveyEngine:
             question,
             acknowledgment,
             include_options=self.session.clarification_attempts >= 1,
+            attempt=self.session.clarification_attempts,
         )
 
     def _question_text(self) -> str:
@@ -103,7 +104,9 @@ class SafeSurveyEngine:
         if self.session.is_complete:
             self.session.state = "complete"
             return speech.COMPLETE, answer
-        bridge = speech.validated_bridge(acknowledgment) or "Thank you."
+        bridge = speech.validated_bridge(acknowledgment) or speech.accepted_bridge(
+            answer.normalized_value, self.session.current_index
+        )
         return f"{bridge} {self._question_text()}", answer
 
     def handle_response(self, transcript: str) -> tuple[str, SurveyAnswer | None]:
@@ -124,7 +127,7 @@ class SafeSurveyEngine:
             if normalized in NO:
                 self._clear_pending()
                 self.session.state = "asking"
-                return self._retry(f"Thank you for correcting me. {self._clarification(question)}")
+                return self._retry(f"Thanks for correcting me. {self._clarification(question)}")
 
         result = Interpretation(command) if command else self._interpret(transcript)
         if result.intent == "stop":
@@ -151,7 +154,7 @@ class SafeSurveyEngine:
         if result.intent == "reject":
             self._clear_pending()
             self.session.state = "asking"
-            return self._retry(f"Thank you for correcting me. {self._clarification(question)}")
+            return self._retry(f"Thanks for correcting me. {self._clarification(question)}")
 
         if result.intent == "select":
             # Naming an option is already the patient's decision, including a

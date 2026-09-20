@@ -152,12 +152,31 @@ Exact classification examples (acknowledgment may be null in every case):
 # A blank line marks a beat the phone survey plays as a short silence.
 PARAGRAPH = "\n\n"
 INTRO = (
-    "Hi, this is an automated check-in call from your doctor’s office. "
-    "I’m calling to see how you’re doing after your surgery and to collect a few answers for your care team. "
-    "It only takes a couple of minutes. "
-    "Answer each question in your own words, and I’ll respond after a brief pause. "
-    "If I interpret your answer, I’ll check with you. "
+    "Hi, this is the automated check-in from your doctor’s office. "
+    "I’m calling to see how you’re doing after your surgery. "
+    "This is for your own recovery, so there are no wrong answers, and it only takes a couple of minutes. "
+    "Just answer each question in your own words, and I’ll respond after a short pause. "
     "You can ask me to repeat, pause, or stop at any time."
+)
+# Said after an answer is locked in, picked by how the patient is doing so the
+# reply is not the same flat "Thank you." six times in a row.
+ACCEPTED_BRIDGES = {
+    "none": ("That’s good to hear.", "Glad to hear that."),
+    "mild": ("Okay, good to know.", "Got it, thanks."),
+    "moderate": ("Okay, I’ve noted that.", "Understood, thank you."),
+    "severe": ("I’m sorry to hear that. I’ve noted it.", "That sounds hard. I’ve got it down."),
+    "extreme": ("I’m really sorry you’re dealing with that. I’ve noted it.", "That sounds very hard. I’ve got it down."),
+}
+DEFAULT_ACCEPTED_BRIDGES = ("Thank you.", "Got it.")
+CLARIFY_BRIDGES = (
+    "Sorry, I didn’t quite catch that.",
+    "Let me try that once more.",
+    "One more time, and take your time.",
+)
+CLARIFY_CLOSERS = (
+    "Which is closest for you?",
+    "Just pick whichever one is closest.",
+    "Whichever fits best is fine.",
 )
 COMPLETE = "Thank you for sharing your answers with me. The survey is complete."
 GAIT_INTRO = (
@@ -209,7 +228,16 @@ def sms_body(link: str) -> str:
     )
 
 
+def accepted_bridge(value: str | None, index: int) -> str:
+    """A short human reaction to a locked-in answer, alternating across questions."""
+
+    choices = ACCEPTED_BRIDGES.get(value or "", DEFAULT_ACCEPTED_BRIDGES)
+    return choices[index % len(choices)]
+
+
 def question_text(question, index: int, total: int) -> str:
+    if index + 1 == total and total > 1:
+        return f"Last question. {question.prompt}"
     return f"Question {index + 1} of {total}. {question.prompt}"
 
 
@@ -229,7 +257,7 @@ def confirmation_text(question, value: str, acknowledgment=None, *, correction=F
         return f"{bridge} Would you say your {question.topic} is {value}?"
     bridge = validated_bridge(acknowledgment) or (
         "I’m sorry you’re dealing with that." if value in {"moderate", "severe", "extreme"}
-        else "Thank you for telling me."
+        else "Thanks for telling me."
     )
     return (
         f"{bridge} It sounds like your {question.topic} may be {value}. "
@@ -237,7 +265,10 @@ def confirmation_text(question, value: str, acknowledgment=None, *, correction=F
     )
 
 
-def clarification_text(question, acknowledgment=None, *, include_options: bool = True) -> str:
-    bridge = validated_bridge(acknowledgment) or "Take your time."
+def clarification_text(
+    question, acknowledgment=None, *, include_options: bool = True, attempt: int = 0
+) -> str:
+    bridge = validated_bridge(acknowledgment) or CLARIFY_BRIDGES[attempt % len(CLARIFY_BRIDGES)]
     options = f" {options_text(question)}" if include_options else ""
-    return f"{bridge} {question.prompt}{options} Which fits your experience best?"
+    closer = CLARIFY_CLOSERS[attempt % len(CLARIFY_CLOSERS)]
+    return f"{bridge} {question.prompt}{options} {closer}"

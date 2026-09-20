@@ -161,10 +161,10 @@ def test_frames_split_audio_into_twenty_millisecond_chunks():
 def test_call_session_runs_a_confirmed_answer():
     session, spoken = build_session()
     asyncio.run(session.begin())
-    assert "check-in call from your doctor’s office" in spoken[0]
+    assert "check-in from your doctor’s office" in spoken[0]
     assert "hip pain" in spoken[0]
     assert "HOOS JR HIP SURVEY" not in spoken[0]
-    assert spoken[0].count("automated check-in call") == 1
+    assert spoken[0].count("automated check-in") == 1
 
     session.add_transcript("moderate")
     assert asyncio.run(session.flush_utterance()) is False
