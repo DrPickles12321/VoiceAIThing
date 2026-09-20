@@ -282,3 +282,46 @@ def test_the_caller_can_talk_over_the_question_but_not_the_greeting(client):
     record = client.app.state.persistence.calls["sess-2"]
     assert any(line.startswith("patient: moderate") for line in record.transcript)
     assert any(message["event"] == "clear" for message in websocket.sent)
+
+
+def test_the_mic_feed_is_muted_while_a_prompt_plays(client):
+    """Deepgram must not hear the prompt the handset echoes back at us."""
+
+    start = {
+        "event": "start",
+        "streamSid": "MZ1",
+        "start": {
+            "streamSid": "MZ1",
+            "callSid": "CA1",
+            "customParameters": {"patientCode": "RGN-0417", "sessionId": "sess-3"},
+        },
+    }
+    speech = base64.b64encode(b"\x01" * 160).decode("ascii")
+    media = {"event": "media", "media": {"track": "inbound", "payload": speech}}
+    websocket = StubWebSocket([start, media])
+    bridge = phone_app.MediaStreamBridge(
+        websocket,
+        client.app.state.settings,
+        phone_app.InMemoryPatientRepository(),
+        client.app.state.persistence,
+        transcriber_factory=ScriptedTranscriber,
+    )
+
+    async def drive() -> None:
+        run = asyncio.create_task(bridge.run())
+        deadline = asyncio.get_running_loop().time() + 10
+        while not bridge.bot_speaking:
+            assert asyncio.get_running_loop().time() < deadline, "timed out"
+            await asyncio.sleep(0.01)
+        heard = len(bridge.transcriber.audio_frames)
+        websocket.inbound.append(json.dumps(media))
+        while len(bridge.transcriber.audio_frames) == heard:
+            assert asyncio.get_running_loop().time() < deadline, "timed out"
+            await asyncio.sleep(0.01)
+        websocket.inbound.append(json.dumps({"event": "stop"}))
+        await run
+
+    asyncio.run(drive())
+
+    assert bridge.transcriber.audio_frames[0] == b"\x01" * 160
+    assert bridge.transcriber.audio_frames[-1] == phone_app.MULAW_SILENCE

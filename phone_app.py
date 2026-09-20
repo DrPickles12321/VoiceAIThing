@@ -184,8 +184,14 @@ class MediaStreamBridge:
                 logger.info(
                     "Stream %s received %d inbound frames", self.stream_sid, self._inbound_frames
                 )
+            # While we are talking the caller's line carries our own prompt
+            # back to us; transcribing it puts the answer a turn behind. Silence
+            # keeps Deepgram's socket warm without feeding it our voice.
+            audio = base64.b64decode(payload)
+            if self.bot_speaking and not self._interruptible:
+                audio = MULAW_SILENCE
             try:
-                await self.transcriber.send_audio(base64.b64decode(payload))
+                await self.transcriber.send_audio(audio)
             except (OSError, WebSocketException) as error:
                 # Losing transcription should not drop the call: the survey can
                 # still speak, and the next frame retries the connection.
@@ -198,6 +204,9 @@ class MediaStreamBridge:
             await self._close()
             return
         self.bot_speaking = False
+        self._interruptible = False
+        if self.session is not None:
+            self.session.discard_pending()
         self._listen_from = asyncio.get_running_loop().time() + ECHO_GRACE_SECONDS
         self._start_silence_timer()
 

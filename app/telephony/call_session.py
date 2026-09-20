@@ -76,6 +76,11 @@ class PhoneCallSession:
         if cleaned:
             self._buffer.append(cleaned)
 
+    def discard_pending(self) -> None:
+        """Forget speech recognized while we were still talking over the line."""
+
+        self._buffer.clear()
+
     async def flush_utterance(self) -> bool:
         """Answer whatever the caller just said. Returns True when the call is over."""
 
