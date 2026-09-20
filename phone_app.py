@@ -297,7 +297,6 @@ class MediaStreamBridge:
         pending = asyncio.create_task(self._synthesize(plan[0][0]))
         for index, (chunk, pause) in enumerate(plan):
             audio = await pending
-            self._interruptible = index + 1 == len(plan)
             if index + 1 < len(plan):
                 pending = asyncio.create_task(self._synthesize(plan[index + 1][0]))
             logger.info(
@@ -324,6 +323,9 @@ class MediaStreamBridge:
                 )
                 if ahead > 0:
                     await asyncio.sleep(ahead)
+        # Everything is queued now and Twilio is a couple of seconds behind, so
+        # the caller is hearing the end of the question: they may talk over it.
+        self._interruptible = True
         await self._send({"event": "mark", "streamSid": self.stream_sid, "mark": {"name": mark}})
 
     async def _stop_playback(self) -> None:
